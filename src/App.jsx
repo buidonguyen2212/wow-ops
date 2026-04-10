@@ -1031,4 +1031,792 @@ function EmployeeInterface({ employeeId, employeeName, onLogout }) {
                   <div key={index} style={styles.taskItem}>
                     <input
                       type="checkbox"
-                      checked={tas
+                      checked={task.completed}
+                      onChange={() => handleTaskToggle(index)}
+                      style={styles.checkbox}
+                    />
+                    <span style={{
+                      ...styles.taskName,
+                      textDecoration: task.completed ? 'line-through' : 'none',
+                      color: task.completed ? '#9ca3af' : '#1f2937'
+                    }}>
+                      {task.name}
+                    </span>
+                    <span style={{
+                      ...styles.taskStatus,
+                      backgroundColor: task.completed ? '#d1fae5' : '#fef3c7',
+                      color: task.completed ? '#065f46' : '#92400e'
+                    }}>
+                      {task.completed ? 'Xong' : 'Chưa'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'kpi' && (
+          <div style={styles.kpiInputSection}>
+            <div style={styles.kpiSection}>
+              <h3 style={{
+                ...styles.sectionTitle,
+                borderLeft: '4px solid #3b82f6',
+                paddingLeft: '12px',
+                marginBottom: '16px'
+              }}>
+                📈 Chỉ số hành động (Leading)
+              </h3>
+              <div style={styles.inputGrid}>
+                {posKPIs.leading.map(kpi => (
+                  <div key={kpi.id} style={styles.inputCard}>
+                    <label style={styles.label}>{kpi.name}</label>
+                    <input
+                      type="number"
+                      value={leadingData[kpi.id] || ''}
+                      onChange={(e) => handleKPIChange(kpi.id, e.target.value, 'leading')}
+                      placeholder="0"
+                      style={styles.input}
+                    />
+                    <div style={styles.targetDisplay}>
+                      Mục tiêu: {kpi.target} {kpi.unit}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={styles.kpiSection}>
+              <h3 style={{
+                ...styles.sectionTitle,
+                borderLeft: '4px solid #10b981',
+                paddingLeft: '12px',
+                marginBottom: '16px'
+              }}>
+                🎯 Chỉ số kết quả (Lagging)
+              </h3>
+              <div style={styles.inputGrid}>
+                {posKPIs.lagging.map(kpi => (
+                  <div key={kpi.id} style={styles.inputCard}>
+                    <label style={styles.label}>{kpi.name}</label>
+                    <input
+                      type="number"
+                      value={laggingData[kpi.id] || ''}
+                      onChange={(e) => handleKPIChange(kpi.id, e.target.value, 'lagging')}
+                      placeholder="0"
+                      style={styles.input}
+                    />
+                    <div style={styles.targetDisplay}>
+                      Mục tiêu: {kpi.target} {kpi.unit}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'progress' && (
+          <div style={styles.progressSection}>
+            <h3 style={styles.chartTitle}>📈 Tiến độ KPI hành động</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={leadingChartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" style={{ fontSize: '12px' }} />
+                <YAxis />
+                <Tooltip contentStyle={{ backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '6px' }} />
+                <Legend />
+                <Bar dataKey="actual" fill="#3b82f6" name="Thực hiện" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="target" fill="#d1d5db" name="Mục tiêu" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+
+            <h3 style={styles.chartTitle}>🎯 Tiến độ KPI kết quả</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={laggingChartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" style={{ fontSize: '12px' }} />
+                <YAxis />
+                <Tooltip contentStyle={{ backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '6px' }} />
+                <Legend />
+                <Bar dataKey="actual" fill="#10b981" name="Thực hiện" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="target" fill="#d1d5db" name="Mục tiêu" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {activeTab === 'feedback' && (
+          <div style={styles.feedbackSection}>
+            {feedback ? (
+              <>
+                <h3 style={styles.sectionTitle}>Feedback từ quản lý</h3>
+                <div style={styles.feedbackDisplay}>
+                  <p style={styles.feedbackText}>{feedback}</p>
+                  <div style={styles.feedbackRating}>
+                    <span style={styles.ratingLabel}>Đánh giá:</span>
+                    <span style={styles.ratingValue}>{rating}/10</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <EmptyState message="Chưa có feedback cho tuần này" />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Main App Component
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+
+  if (!currentUser) {
+    return <LoginScreen onLogin={setCurrentUser} />;
+  }
+
+  if (currentUser.role === 'manager') {
+    if (selectedEmployee) {
+      return (
+        <EmployeeDetail
+          employee={selectedEmployee}
+          onBack={() => setSelectedEmployee(null)}
+          onLogout={() => setCurrentUser(null)}
+        />
+      );
+    }
+    return (
+      <ManagerDashboard
+        onLogout={() => setCurrentUser(null)}
+        onSelectEmployee={setSelectedEmployee}
+      />
+    );
+  }
+
+  return (
+    <EmployeeInterface
+      employeeId={currentUser.employeeId}
+      employeeName={currentUser.employeeName}
+      onLogout={() => setCurrentUser(null)}
+    />
+  );
+}
+
+// Comprehensive Styles - All Inline
+const styles = {
+  // Login
+  loginContainer: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(135deg, #065f46 0%, #10b981 100%)',
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    padding: '20px'
+  },
+  loginCard: {
+    background: 'white',
+    borderRadius: '12px',
+    padding: '40px',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    maxWidth: '400px',
+    width: '100%'
+  },
+  logo: {
+    fontSize: '32px',
+    fontWeight: 'bold',
+    color: '#065f46',
+    textAlign: 'center',
+    marginBottom: '20px',
+    letterSpacing: '2px'
+  },
+  loginTitle: {
+    fontSize: '18px',
+    color: '#374151',
+    textAlign: 'center',
+    marginBottom: '30px',
+    fontWeight: '500'
+  },
+  roleButtons: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  roleButton: {
+    padding: '12px 24px',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '16px',
+    fontWeight: '600',
+    color: 'white',
+    cursor: 'pointer',
+    transition: 'all 0.3s'
+  },
+  loginBtn: {
+    padding: '12px 24px',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '16px',
+    fontWeight: '600',
+    color: 'white',
+    cursor: 'pointer',
+    transition: 'all 0.3s',
+    marginBottom: '8px'
+  },
+  formGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  label: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: '4px'
+  },
+  input: {
+    padding: '10px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: 'inherit'
+  },
+  select: {
+    padding: '10px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    backgroundColor: 'white',
+    cursor: 'pointer'
+  },
+
+  // Layout
+  container: {
+    display: 'flex',
+    minHeight: '100vh',
+    backgroundColor: '#f9fafb',
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+  },
+  sidebar: {
+    width: '260px',
+    backgroundColor: '#065f46',
+    color: 'white',
+    padding: '24px 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'fixed',
+    left: 0,
+    top: 0,
+    height: '100vh',
+    overflowY: 'auto'
+  },
+  sidebarLogo: {
+    fontSize: '18px',
+    fontWeight: '700',
+    marginBottom: '32px',
+    letterSpacing: '1px'
+  },
+  empHeader: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: '12px',
+    borderRadius: '8px',
+    marginBottom: '24px'
+  },
+  empName: {
+    fontSize: '14px',
+    fontWeight: '600',
+    marginBottom: '4px'
+  },
+  empPosition: {
+    fontSize: '12px',
+    opacity: '0.8'
+  },
+  nav: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  navItem: {
+    padding: '10px 12px',
+    borderRadius: '6px',
+    fontSize: '14px',
+    color: 'white',
+    cursor: 'pointer',
+    border: 'none',
+    background: 'transparent',
+    textAlign: 'left',
+    transition: 'all 0.2s'
+  },
+  divider: {
+    height: '1px',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    margin: '16px 0'
+  },
+  employeeList: {
+    flex: 1
+  },
+  sectionTitle: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    marginBottom: '12px'
+  },
+  employeeListItem: {
+    padding: '10px 12px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    color: 'white',
+    cursor: 'pointer',
+    marginBottom: '6px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    transition: 'all 0.2s'
+  },
+  badge: {
+    fontSize: '11px',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: '2px 6px',
+    borderRadius: '4px'
+  },
+  addEmployeeBtn: {
+    width: '100%',
+    padding: '10px 12px',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    border: '1px dashed rgba(255,255,255,0.3)',
+    borderRadius: '6px',
+    color: 'white',
+    fontSize: '13px',
+    cursor: 'pointer',
+    marginTop: '12px'
+  },
+  backBtn: {
+    padding: '10px 12px',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    border: 'none',
+    borderRadius: '6px',
+    color: 'white',
+    cursor: 'pointer',
+    fontSize: '14px',
+    marginBottom: '12px',
+    width: '100%',
+    textAlign: 'center'
+  },
+  logoutBtn: {
+    padding: '10px 12px',
+    backgroundColor: '#dc2626',
+    border: 'none',
+    borderRadius: '6px',
+    color: 'white',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+    width: '100%',
+    marginTop: 'auto'
+  },
+  mainContent: {
+    flex: 1,
+    marginLeft: '260px',
+    padding: '32px'
+  },
+  header: {
+    marginBottom: '32px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  pageTitle: {
+    fontSize: '28px',
+    fontWeight: '700',
+    color: '#1f2937',
+    margin: '0'
+  },
+  subtitle: {
+    fontSize: '14px',
+    color: '#6b7280',
+    margin: '4px 0 0 0'
+  },
+  dateDisplay: {
+    fontSize: '14px',
+    color: '#6b7280',
+    margin: '0'
+  },
+  dateButtons: {
+    display: 'flex',
+    gap: '8px'
+  },
+  dateButton: {
+    padding: '8px 16px',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+
+  // Cards
+  summaryCards: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '16px',
+    marginBottom: '32px'
+  },
+  summaryCard: {
+    backgroundColor: 'white',
+    padding: '20px',
+    borderRadius: '8px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+  },
+  cardLabel: {
+    fontSize: '13px',
+    color: '#6b7280',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    marginBottom: '8px'
+  },
+  cardValue: {
+    fontSize: '32px',
+    fontWeight: '700',
+    color: '#10b981'
+  },
+  employeeGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: '20px'
+  },
+  employeeCard: {
+    backgroundColor: 'white',
+    padding: '20px',
+    borderRadius: '8px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    cursor: 'pointer',
+    transition: 'all 0.3s'
+  },
+  cardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px'
+  },
+  positionBadge: {
+    fontSize: '11px',
+    fontWeight: '700',
+    backgroundColor: '#dbeafe',
+    color: '#1e40af',
+    padding: '4px 8px',
+    borderRadius: '4px'
+  },
+  cardMetric: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '12px',
+    fontSize: '13px'
+  },
+  metricLabel: {
+    color: '#6b7280',
+    fontWeight: '600',
+    minWidth: '90px'
+  },
+  metricValue: {
+    fontWeight: '700',
+    color: '#1f2937'
+  },
+  progressBar: {
+    height: '6px',
+    backgroundColor: '#e5e7eb',
+    borderRadius: '3px',
+    overflow: 'hidden'
+  },
+  progressFill: {
+    height: '100%',
+    transition: 'width 0.3s'
+  },
+
+  // KPI Cards
+  kpiGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    gap: '16px'
+  },
+  kpiCard: {
+    backgroundColor: 'white',
+    padding: '16px',
+    borderRadius: '8px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+  },
+  kpiHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '12px'
+  },
+  kpiName: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: '#374151'
+  },
+  editBtn: {
+    background: 'none',
+    border: 'none',
+    fontSize: '16px',
+    cursor: 'pointer',
+    padding: '4px 8px'
+  },
+  kpiValue: {
+    fontSize: '18px',
+    fontWeight: '700',
+    color: '#10b981',
+    marginBottom: '8px'
+  },
+  editField: {
+    display: 'flex',
+    gap: '4px',
+    marginTop: '8px'
+  },
+  saveBtn: {
+    padding: '6px 8px',
+    backgroundColor: '#10b981',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '600'
+  },
+  cancelBtn: {
+    padding: '6px 8px',
+    backgroundColor: '#ef4444',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '600'
+  },
+
+  // Tabs
+  tabBar: {
+    display: 'flex',
+    gap: '24px',
+    borderBottom: '1px solid #e5e7eb',
+    marginBottom: '24px'
+  },
+  tabButton: {
+    padding: '12px 0',
+    background: 'none',
+    border: 'none',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    color: '#6b7280',
+    transition: 'all 0.2s'
+  },
+  tabContent: {
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '8px',
+    minHeight: '400px'
+  },
+
+  // Tasks
+  tasksSection: {
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '8px'
+  },
+  progressText: {
+    fontSize: '14px',
+    color: '#6b7280',
+    marginBottom: '24px'
+  },
+  tasksList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  taskItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '12px',
+    backgroundColor: '#f9fafb',
+    borderRadius: '6px',
+    border: '1px solid #e5e7eb'
+  },
+  checkbox: {
+    width: '20px',
+    height: '20px',
+    cursor: 'pointer'
+  },
+  taskName: {
+    fontSize: '14px',
+    fontWeight: '500',
+    flex: 1
+  },
+  taskStatus: {
+    fontSize: '12px',
+    fontWeight: '600',
+    padding: '4px 10px',
+    borderRadius: '4px'
+  },
+
+  // KPI Input
+  kpiInputSection: {
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '8px'
+  },
+  kpiSection: {
+    marginBottom: '32px'
+  },
+  inputGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: '16px'
+  },
+  inputCard: {
+    backgroundColor: '#f9fafb',
+    padding: '16px',
+    borderRadius: '8px',
+    border: '1px solid #e5e7eb'
+  },
+  targetDisplay: {
+    fontSize: '12px',
+    color: '#6b7280',
+    marginTop: '8px'
+  },
+
+  // Charts
+  progressSection: {
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '8px'
+  },
+  chartTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: '16px',
+    marginTop: '24px'
+  },
+
+  // Feedback
+  feedbackSection: {
+    backgroundColor: 'white',
+    padding: '24px',
+    borderRadius: '8px'
+  },
+  feedbackForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    backgroundColor: 'white'
+  },
+  formTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#1f2937'
+  },
+  textarea: {
+    padding: '12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    minHeight: '120px',
+    resize: 'vertical'
+  },
+  feedbackDisplay: {
+    backgroundColor: '#f0fdf4',
+    padding: '16px',
+    borderRadius: '8px',
+    border: '1px solid #dcfce7'
+  },
+  feedbackText: {
+    fontSize: '14px',
+    color: '#374151',
+    marginBottom: '12px',
+    lineHeight: '1.6'
+  },
+  feedbackRating: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center'
+  },
+  ratingLabel: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: '#6b7280'
+  },
+  ratingValue: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: '#10b981'
+  },
+
+  // Modal
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000
+  },
+  modal: {
+    backgroundColor: 'white',
+    padding: '32px',
+    borderRadius: '12px',
+    maxWidth: '400px',
+    width: '90%',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+  },
+  modalTitle: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#1f2937',
+    marginBottom: '20px'
+  },
+  modalButtons: {
+    display: 'flex',
+    gap: '12px',
+    marginTop: '20px'
+  },
+  primaryBtn: {
+    flex: 1,
+    padding: '12px 24px',
+    backgroundColor: '#10b981',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  secondaryBtn: {
+    flex: 1,
+    padding: '12px 24px',
+    backgroundColor: '#e5e7eb',
+    color: '#374151',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  }
+};
