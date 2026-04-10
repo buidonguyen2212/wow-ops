@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, setDoc, getDoc, getDocs, doc, updateDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, arrayUnion, where, query } from 'firebase/firestore';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 
-// Firebase Configuration
+// Firebase config - EXACT AS PROVIDED
 const firebaseConfig = {
   apiKey: "AIzaSy0Wjpzvzb4FYsLkbX5ooKXa2kRwx911tyk",
   authDomain: "wowart-ops.firebaseapp.com",
@@ -16,1038 +16,1019 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Position Definitions with Default KPIs and Tasks
-const POSITIONS = {
-  'GV': {
-    name: 'Giáo viên',
-    icon: '👨‍🏫',
-    kpis: [
-      { id: 'classes', name: 'Số buổi dạy', type: 'count', target: 5, unit: '/tuần' },
-      { id: 'satisfaction', name: 'Điểm hài lòng học viên', type: 'score', target: 8, unit: '/10' },
-      { id: 'attendance', name: 'Tỷ lệ học viên đi học', type: 'rate', target: 85, unit: '%' }
+// Position KPI definitions - Leading → Lagging Framework
+const positionKPIs = {
+  'SL': {
+    leading: [
+      { id: 'calls', name: 'Số cuộc gọi', unit: 'cuộc', target: 8 },
+      { id: 'posts', name: 'Số post đăng', unit: 'post', target: 2 },
+      { id: 'zalo', name: 'Tin Zalo', unit: 'tin', target: 15 },
+      { id: 'followup', name: 'Follow-up khách cũ', unit: 'khách', target: 5 },
+      { id: 'tours', name: 'Khách tham quan', unit: 'khách', target: 2 }
     ],
-    tasks: [
-      { name: 'Soạn giáo án', completed: false },
-      { name: 'Dạy đúng giờ', completed: false },
-      { name: 'Chấm bài/feedback', completed: false },
-      { name: 'Báo cáo tình hình lớp', completed: false }
+    lagging: [
+      { id: 'trial_appts', name: 'Hẹn học thử', unit: 'hẹn', target: 5 },
+      { id: 'companion', name: 'Hẹn đồng hành', unit: 'hẹn', target: 3 },
+      { id: 'new_students', name: 'HV mới chốt', unit: 'HV', target: 3 },
+      { id: 'new_revenue', name: 'DT mới (triệu)', unit: 'M', target: 15 },
+      { id: 'retention', name: 'HV tái ĐK', unit: 'HV', target: 5 },
+      { id: 'retention_rev', name: 'DT tái ĐK (triệu)', unit: 'M', target: 25 },
+      { id: 'churn', name: 'HV không tái ĐK', unit: 'HV', target: 0, lowerBetter: true },
+      { id: 'close_rate', name: 'Tỷ lệ chốt', unit: '%', target: 25 }
+    ],
+    dailyTasks: [
+      'Gọi điện khách mới',
+      'Follow-up khách cũ',
+      'Đăng bài/post',
+      'Gửi tin Zalo',
+      'Cập nhật báo cáo cuối ngày'
     ]
   },
   'MK': {
-    name: 'Marketing',
-    icon: '📱',
-    kpis: [
-      { id: 'content', name: 'Bài content đăng', type: 'count', target: 5, unit: '/tuần' },
-      { id: 'engagement', name: 'Engagement rate', type: 'rate', target: 3, unit: '%' },
-      { id: 'leads', name: 'Leads từ content', type: 'count', target: 10, unit: '/tuần' }
+    leading: [
+      { id: 'edit_video', name: 'Edit video', unit: 'video', target: 3 },
+      { id: 'shoot', name: 'Quay sources', unit: 'shot', target: 2 },
+      { id: 'chat', name: 'Chat/tin nhắn', unit: 'tin', target: 20 },
+      { id: 'post', name: 'Số bài đăng', unit: 'bài', target: 3 },
+      { id: 'reply_comment', name: 'Trả lời comment', unit: 'comment', target: 15 }
     ],
-    tasks: [
-      { name: 'Đăng bài social media', completed: false },
-      { name: 'Chụp ảnh/quay video', completed: false },
-      { name: 'Trả lời comment/inbox', completed: false },
-      { name: 'Theo dõi ads', completed: false }
+    lagging: [
+      { id: 'videos_done', name: 'Video hoàn thành', unit: 'video', target: 5 },
+      { id: 'leads', name: 'Leads chat', unit: 'lead', target: 20 },
+      { id: 'trial_booked', name: 'Học thử hẹn', unit: 'HV', target: 8 },
+      { id: 'trial_showed', name: 'Học thử đã lên', unit: 'HV', target: 5 },
+      { id: 'engagement', name: 'Engagement rate', unit: '%', target: 5 },
+      { id: 'cpl', name: 'Chi phí/lead (K)', unit: 'K', target: 50, lowerBetter: true }
+    ],
+    dailyTasks: [
+      'Quay video/chụp ảnh',
+      'Edit và đăng content',
+      'Trả lời comment/inbox',
+      'Theo dõi ads',
+      'Báo cáo kết quả'
     ]
   },
-  'SL': {
-    name: 'Sales/Tư vấn',
-    icon: '💼',
-    kpis: [
-      { id: 'calls', name: 'Số cuộc gọi tư vấn', type: 'count', target: 30, unit: '/tuần' },
-      { id: 'conversion', name: 'Tỷ lệ chốt', type: 'rate', target: 20, unit: '%' },
-      { id: 'revenue', name: 'Doanh thu', type: 'count', target: 50, unit: 'tr/tuần' }
+  'GV': {
+    leading: [
+      { id: 'classes', name: 'Số buổi dạy', unit: 'buổi', target: 2 },
+      { id: 'lesson_plans', name: 'Giáo án soạn', unit: 'giáo án', target: 1 },
+      { id: 'parent_fb', name: 'Feedback phụ huynh', unit: 'feedback', target: 3 },
+      { id: 'support', name: 'HV hỗ trợ riêng', unit: 'HV', target: 2 }
     ],
-    tasks: [
-      { name: 'Gọi điện khách hàng mới', completed: false },
-      { name: 'Follow-up khách cũ', completed: false },
-      { name: 'Cập nhật CRM', completed: false },
-      { name: 'Báo cáo kết quả cuối ngày', completed: false }
+    lagging: [
+      { id: 'satisfaction', name: 'Điểm hài lòng HV', unit: '/10', target: 8 },
+      { id: 'attendance', name: 'Tỷ lệ đi học', unit: '%', target: 85 },
+      { id: 'retention', name: 'Tỷ lệ tái ĐK', unit: '%', target: 70 }
+    ],
+    dailyTasks: [
+      'Soạn giáo án',
+      'Dạy đúng giờ',
+      'Chấm bài/feedback',
+      'Liên hệ phụ huynh',
+      'Báo cáo tình hình lớp'
     ]
   },
   'AD': {
-    name: 'Admin/Vận hành',
-    icon: '⚙️',
-    kpis: [
-      { id: 'tasks', name: 'Công việc hoàn thành', type: 'count', target: 20, unit: '/tuần' },
-      { id: 'response', name: 'Thời gian phản hồi', type: 'score', target: 9, unit: '/10' },
-      { id: 'accuracy', name: 'Tỷ lệ chính xác', type: 'rate', target: 95, unit: '%' }
+    leading: [
+      { id: 'files', name: 'Hồ sơ xử lý', unit: 'hồ sơ', target: 10 },
+      { id: 'schedule', name: 'Lịch học điều phối', unit: 'lịch', target: 8 },
+      { id: 'facility', name: 'CSVC kiểm tra', unit: 'kiểm tra', target: 3 },
+      { id: 'reports', name: 'Báo cáo gửi', unit: 'báo cáo', target: 2 }
     ],
-    tasks: [
-      { name: 'Xử lý hồ sơ', completed: false },
-      { name: 'Điều phối lịch học', completed: false },
-      { name: 'Kiểm tra cơ sở vật chất', completed: false },
-      { name: 'Báo cáo tổng hợp', completed: false }
+    lagging: [
+      { id: 'ontime', name: 'Hoàn thành đúng hạn', unit: '%', target: 95 },
+      { id: 'internal_fb', name: 'Phản hồi nội bộ', unit: '/10', target: 8 },
+      { id: 'accuracy', name: 'Tỷ lệ chính xác', unit: '%', target: 98 }
+    ],
+    dailyTasks: [
+      'Xử lý hồ sơ',
+      'Điều phối lịch học',
+      'Kiểm tra cơ sở vật chất',
+      'Gửi báo cáo tổng hợp'
     ]
   }
 };
 
-// Utility Functions
+const positionNames = {
+  'SL': 'Sales/Tư vấn',
+  'MK': 'Marketing',
+  'GV': 'Giáo viên',
+  'AD': 'Admin/Vận hành'
+};
+
+// Utility functions
 const getWeekKey = (date = new Date()) => {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  const diff = d - yearStart;
-  const week = Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
-  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const week = Math.ceil((d.getDate() - d.getDay()) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+};
+
+const getDateString = (date = new Date()) => {
+  const d = new Date(date);
+  return d.toISOString().split('T')[0];
+};
+
+const getWeekDates = (offset = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay() + offset * 7);
+  const start = new Date(d);
+  start.setDate(start.getDate() + 1);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  return { start, end };
 };
 
 const formatDate = (date) => {
-  return new Date(date).toLocaleDateString('vi-VN', { month: 'short', day: 'numeric', year: '2-digit' });
+  return date.toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
-const getStatusColor = (value, target, type) => {
-  const percentage = (value / target) * 100;
-  if (percentage >= 100) return '#059669';
-  if (percentage >= 80) return '#f59e0b';
-  return '#ef4444';
-};
-
-// Main App Component
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [userRole, setUserRole] = useState(null);
-  const [currentPage, setCurrentPage] = useState('dashboard');
-  const [employees, setEmployees] = useState([]);
-  const [selectedEmployee, setSelectedEmployee] = useState(null);
-  const [currentWeek, setCurrentWeek] = useState(getWeekKey());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  // Load initial data
-  useEffect(() => {
-    const initApp = async () => {
-      try {
-        setLoading(true);
-        const snapshot = await getDocs(collection(db, 'wowops'));
-
-        if (!snapshot.empty) {
-          const doc = snapshot.docs[0];
-          const data = doc.data();
-          setEmployees(data.employees || []);
-          if (data.employees && data.employees.length > 0) {
-            setSelectedEmployee(data.employees[0].id);
-          }
-        } else {
-          const employeesData = [];
-          await setDoc(doc(db, 'wowops', 'config'), {
-            employees: employeesData,
-            managerPin: '1234',
-            weeklyTargets: {}
-          });
-          setEmployees(employeesData);
-        }
-        setUser({ name: 'Quản lý', id: 'manager-001' });
-        setUserRole('manager');
-      } catch (err) {
-        setError('Lỗi tải dữ liệu: ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    initApp();
-  }, []);
-
-  // Save employees to Firestore
-  const saveEmployees = async (empList) => {
-    try {
-      const snapshot = await getDocs(collection(db, 'wowops'));
-      if (!snapshot.empty) {
-        await updateDoc(doc(db, 'wowops', snapshot.docs[0].id), {
-          employees: empList
-        });
-      }
-      setEmployees(empList);
-    } catch (err) {
-      setError('Lỗi lưu: ' + err.message);
-    }
-  };
-
-  // Add new employee
-  const addEmployee = async (name, position) => {
-    const newId = `emp-${Date.now()}`;
-    const newEmp = { id: newId, name, position, createdAt: new Date().toISOString() };
-
-    // Initialize KPIs and tasks
-    const weekKey = getWeekKey();
-    const posConfig = POSITIONS[position];
-
-    try {
-      // Save KPIs
-      await setDoc(doc(db, 'wowops', `employee_${newId}_kpis_${weekKey}`), {
-        kpis: posConfig.kpis.map(kpi => ({ ...kpi, value: 0 })),
-        weekKey
-      });
-
-      // Save tasks
-      await setDoc(doc(db, 'wowops', `employee_${newId}_tasks_${weekKey}`), {
-        tasks: posConfig.tasks.map(task => ({ ...task, date: new Date().toISOString() })),
-        weekKey
-      });
-
-      const newList = [...employees, newEmp];
-      await saveEmployees(newList);
-      setCurrentPage('dashboard');
-    } catch (err) {
-      setError('Lỗi thêm nhân viên: ' + err.message);
-    }
-  };
-
-  // Fetch employee KPIs
-  const getEmployeeKPIs = async (empId, weekKey) => {
-    try {
-      const docRef = doc(db, 'wowops', `employee_${empId}_kpis_${weekKey}`);
-      const snapshot = await getDoc(docRef);
-      return snapshot.exists() ? snapshot.data().kpis : [];
-    } catch {
-      return [];
-    }
-  };
-
-  // Fetch employee tasks
-  const getEmployeeTasks = async (empId, weekKey) => {
-    try {
-      const docRef = doc(db, 'wowops', `employee_${empId}_tasks_${weekKey}`);
-      const snapshot = await getDoc(docRef);
-      return snapshot.exists() ? snapshot.data().tasks : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const renderPage = () => {
-    if (loading) return <LoadingScreen />;
-    if (!user) return <LoginScreen onLogin={() => setUserRole('manager')} />;
-
-    switch (currentPage) {
-      case 'dashboard':
-        return <ManagerDashboard employees={employees} weekKey={currentWeek} getKpis={getEmployeeKPIs} getTasks={getEmployeeTasks} />;
-      case 'add-employee':
-        return <AddEmployeeForm onAdd={addEmployee} onClose={() => setCurrentPage('dashboard')} />;
-      case 'weekly-setup':
-        return <WeeklySetupPage employees={employees} weekKey={currentWeek} />;
-      case 'employee-detail':
-        return <EmployeeDetailPage empId={selectedEmployee} weekKey={currentWeek} employees={employees} />;
-      case 'reports':
-        return <ReportsPage employees={employees} />;
-      default:
-        return <ManagerDashboard employees={employees} weekKey={currentWeek} getKpis={getEmployeeKPIs} getTasks={getEmployeeTasks} />;
-    }
-  };
-
+// Loading Skeleton Component
+function LoadingSkeleton() {
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
-      {userRole === 'manager' && (
-        <Sidebar
-          open={sidebarOpen}
-          setOpen={setSidebarOpen}
-          currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
-          employees={employees}
-          selectedEmployee={selectedEmployee}
-          setSelectedEmployee={setSelectedEmployee}
-        />
-      )}
-
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <Header
-          title={getPageTitle(currentPage)}
-          user={user}
-          onLogout={() => { setUser(null); setUserRole(null); }}
-        />
-        <div style={{ flex: 1, overflow: 'auto', padding: '24px', backgroundColor: '#fafafa' }}>
-          {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
-          {renderPage()}
-        </div>
-      </div>
+    <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>
+      <div style={{ fontSize: '14px', animation: 'pulse 2s infinite' }}>⏳ Đang tải...</div>
     </div>
   );
-
-  function getPageTitle(page) {
-    switch(page) {
-      case 'dashboard': return 'Bảng điều khiển';
-      case 'add-employee': return 'Thêm nhân viên';
-      case 'weekly-setup': return 'Thiết lập tuần';
-      case 'employee-detail': return 'Chi tiết nhân viên';
-      case 'reports': return 'Báo cáo';
-      default: return 'WOW ART Ops';
-    }
-  }
 }
 
-// Sidebar Component
-function Sidebar({ open, setOpen, currentPage, setCurrentPage, employees, selectedEmployee, setSelectedEmployee }) {
+// Empty State Component
+function EmptyState({ message, actionText, onAction }) {
   return (
-    <div style={{
-      width: open ? 280 : 80,
-      backgroundColor: '#ffffff',
-      borderRight: '1px solid #f3f4f6',
-      display: 'flex',
-      flexDirection: 'column',
-      transition: 'width 0.3s ease',
-      zIndex: 100
-    }}>
-      <div style={{ padding: '20px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        {open && <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#059669' }}>WOW ART</h1>}
-        <button
-          onClick={() => setOpen(!open)}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '20px',
-            cursor: 'pointer',
-            padding: '8px'
-          }}
-        >
-          ☰
+    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#6b7280' }}>
+      <p style={{ fontSize: '16px', marginBottom: '16px' }}>{message}</p>
+      {actionText && (
+        <button onClick={onAction} style={styles.primaryBtn}>
+          {actionText}
         </button>
-      </div>
-
-      <nav style={{ flex: 1, padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <NavItem icon="📊" label="Dashboard" active={currentPage === 'dashboard'} onClick={() => setCurrentPage('dashboard')} open={open} />
-        <NavItem icon="➕" label="Thêm NV" active={currentPage === 'add-employee'} onClick={() => setCurrentPage('add-employee')} open={open} />
-        <NavItem icon="🎯" label="Thiết lập" active={currentPage === 'weekly-setup'} onClick={() => setCurrentPage('weekly-setup')} open={open} />
-        <NavItem icon="📈" label="Báo cáo" active={currentPage === 'reports'} onClick={() => setCurrentPage('reports')} open={open} />
-      </nav>
-
-      {open && employees.length > 0 && (
-        <div style={{ padding: '16px', borderTop: '1px solid #f3f4f6', maxHeight: '200px', overflowY: 'auto' }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', color: '#6b7280' }}>Nhân viên</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {employees.map(emp => (
-              <button
-                key={emp.id}
-                onClick={() => { setSelectedEmployee(emp.id); setCurrentPage('employee-detail'); }}
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: selectedEmployee === emp.id ? '#f3f4f6' : 'transparent',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontSize: '13px',
-                  color: '#111827',
-                  transition: 'background-color 0.2s'
-                }}
-              >
-                {emp.name}
-              </button>
-            ))}
-          </div>
-        </div>
       )}
-    </div>
-  );
-}
-
-// Navigation Item
-function NavItem({ icon, label, active, onClick, open }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '12px 16px',
-        backgroundColor: active ? '#d1fae5' : 'transparent',
-        color: active ? '#059669' : '#6b7280',
-        border: 'none',
-        borderRadius: '8px',
-        cursor: 'pointer',
-        fontWeight: active ? '600' : '500',
-        fontSize: '14px',
-        transition: 'all 0.2s',
-        justifyContent: open ? 'flex-start' : 'center',
-        whiteSpace: 'nowrap'
-      }}
-    >
-      <span style={{ fontSize: '18px' }}>{icon}</span>
-      {open && label}
-    </button>
-  );
-}
-
-// Header Component
-function Header({ title, user, onLogout }) {
-  return (
-    <div style={{
-      padding: '20px 24px',
-      borderBottom: '1px solid #f3f4f6',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: '#ffffff'
-    }}>
-      <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: '#111827' }}>{title}</h1>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        <span style={{ fontSize: '14px', color: '#6b7280' }}>👤 {user?.name}</span>
-        <button
-          onClick={onLogout}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#ef4444',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: '500'
-          }}
-        >
-          Đăng xuất
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Loading Screen
-function LoadingScreen() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
-        <p style={{ color: '#6b7280' }}>Đang tải dữ liệu...</p>
-      </div>
     </div>
   );
 }
 
 // Login Screen
 function LoginScreen({ onLogin }) {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100vh',
-      backgroundColor: '#fafafa'
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        padding: '40px',
-        borderRadius: '12px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-        textAlign: 'center',
-        maxWidth: '400px'
-      }}>
-        <h1 style={{ fontSize: '32px', marginBottom: '8px', color: '#059669' }}>WOW ART</h1>
-        <p style={{ color: '#6b7280', marginBottom: '32px' }}>Performance Management</p>
-        <button
-          onClick={onLogin}
-          style={{
-            width: '100%',
-            padding: '12px',
-            backgroundColor: '#059669',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '16px',
-            fontWeight: '600',
-            cursor: 'pointer'
-          }}
-        >
-          Đăng nhập
-        </button>
-      </div>
-    </div>
-  );
-}
+  const [role, setRole] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
-// Error Banner
-function ErrorBanner({ message, onClose }) {
+  useEffect(() => {
+    if (role === 'employee') {
+      fetchEmployees();
+    }
+  }, [role]);
+
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true);
+      const docRef = doc(db, 'wowops', 'employees');
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setEmployees(docSnap.data().value || []);
+      }
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = () => {
+    if (role === 'manager') {
+      onLogin({ role: 'manager' });
+    } else if (selectedEmployee) {
+      onLogin({ role: 'employee', employeeId: selectedEmployee.id, employeeName: selectedEmployee.name });
+    }
+  };
+
+  const filteredEmployees = employees.filter(emp =>
+    emp.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div style={{
-      padding: '12px 16px',
-      backgroundColor: '#fee2e2',
-      color: '#991b1b',
-      borderRadius: '8px',
-      marginBottom: '16px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between'
-    }}>
-      <span>{message}</span>
-      <button
-        onClick={onClose}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }}
-      >
-        ×
-      </button>
+    <div style={styles.loginContainer}>
+      <div style={styles.loginCard}>
+        <div style={styles.logo}>WOW ART</div>
+        <h1 style={styles.loginTitle}>Hệ thống quản lý hiệu suất</h1>
+
+        {!role ? (
+          <div style={styles.roleButtons}>
+            <button
+              onClick={() => setRole('manager')}
+              style={{ ...styles.roleButton, backgroundColor: '#10b981' }}
+            >
+              Đăng nhập Quản lý
+            </button>
+            <button
+              onClick={() => setRole('employee')}
+              style={{ ...styles.roleButton, backgroundColor: '#3b82f6' }}
+            >
+              Đăng nhập Nhân viên
+            </button>
+          </div>
+        ) : role === 'manager' ? (
+          <div style={styles.formGroup}>
+            <button
+              onClick={handleLogin}
+              style={{ ...styles.loginBtn, backgroundColor: '#10b981' }}
+            >
+              Vào Dashboard
+            </button>
+            <button
+              onClick={() => setRole(null)}
+              style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}
+            >
+              Quay lại
+            </button>
+          </div>
+        ) : (
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Tìm và chọn nhân viên:</label>
+            <input
+              type="text"
+              placeholder="Tìm kiếm tên nhân viên..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={styles.input}
+            />
+            <select
+              value={selectedEmployee?.id || ''}
+              onChange={(e) => {
+                const emp = employees.find(e => e.id === e.target.value);
+                setSelectedEmployee(emp);
+              }}
+              style={styles.select}
+            >
+              <option value="">-- Chọn nhân viên --</option>
+              {filteredEmployees.map(emp => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} ({positionNames[emp.position]})
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleLogin}
+              disabled={!selectedEmployee}
+              style={{ ...styles.loginBtn, backgroundColor: selectedEmployee ? '#3b82f6' : '#d1d5db', cursor: selectedEmployee ? 'pointer' : 'not-allowed' }}
+            >
+              Đăng nhập
+            </button>
+            <button
+              onClick={() => { setRole(null); setSearchTerm(''); setSelectedEmployee(null); }}
+              style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}
+            >
+              Quay lại
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // Manager Dashboard
-function ManagerDashboard({ employees, weekKey, getKpis, getTasks }) {
-  const [kpiData, setKpiData] = useState({});
-  const [taskData, setTaskData] = useState({});
+function ManagerDashboard({ onLogout, onSelectEmployee }) {
+  const [employees, setEmployees] = useState([]);
+  const [dateOffset, setDateOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [newEmployeeName, setNewEmployeeName] = useState('');
+  const [newEmployeePosition, setNewEmployeePosition] = useState('SL');
 
   useEffect(() => {
-    const loadData = async () => {
-      const kpis = {};
-      const tasks = {};
-      for (const emp of employees) {
-        kpis[emp.id] = await getKpis(emp.id, weekKey);
-        tasks[emp.id] = await getTasks(emp.id, weekKey);
+    fetchEmployees();
+  }, []);
+
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true);
+      const docRef = doc(db, 'wowops', 'employees');
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const emps = docSnap.data().value || [];
+        const enrichedEmps = await Promise.all(
+          emps.map(async (emp) => {
+            try {
+              const weekKey = getWeekKey();
+              const leadingRef = doc(db, 'wowops', `emp_${emp.id}_leading_${weekKey}`);
+              const laggingRef = doc(db, 'wowops', `emp_${emp.id}_lagging_${weekKey}`);
+              const tasksRef = doc(db, 'wowops', `emp_${emp.id}_tasks_${getDateString()}`);
+
+              const leadingSnap = await getDoc(leadingRef);
+              const laggingSnap = await getDoc(laggingRef);
+              const tasksSnap = await getDoc(tasksRef);
+
+              const leadingData = leadingSnap.exists() ? leadingSnap.data().value || {} : {};
+              const laggingData = laggingSnap.exists() ? laggingSnap.data().value || {} : {};
+              const tasksData = tasksSnap.exists() ? tasksSnap.data().value || [] : [];
+
+              const completedTasks = tasksData.filter(t => t.completed).length;
+              const taskCompletion = tasksData.length > 0 ? Math.round((completedTasks / tasksData.length) * 100) : 0;
+
+              const posKPIs = positionKPIs[emp.position];
+              const leadingAvg = posKPIs.leading.length > 0
+                ? Math.round(Object.values(leadingData).reduce((a, b) => a + b, 0) / posKPIs.leading.length)
+                : 0;
+              const laggingAvg = posKPIs.lagging.length > 0
+                ? Math.round(Object.values(laggingData).reduce((a, b) => a + b, 0) / posKPIs.lagging.length)
+                : 0;
+
+              return {
+                ...emp,
+                taskCompletion,
+                leadingAvg,
+                laggingAvg,
+                leadingData,
+                laggingData
+              };
+            } catch (error) {
+              console.error(`Error enriching employee ${emp.id}:`, error);
+              return { ...emp, taskCompletion: 0, leadingAvg: 0, laggingAvg: 0, leadingData: {}, laggingData: {} };
+            }
+          })
+        );
+        setEmployees(enrichedEmps);
       }
-      setKpiData(kpis);
-      setTaskData(tasks);
-    };
-    if (employees.length > 0) loadData();
-  }, [employees, weekKey, getKpis, getTasks]);
-
-  return (
-    <div>
-      <div style={{ marginBottom: '32px' }}>
-        <h2 style={{ color: '#059669', fontSize: '18px', marginBottom: '16px' }}>Tuần: {weekKey}</h2>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-        {employees.map(emp => {
-          const position = POSITIONS[emp.position];
-          const empKpis = kpiData[emp.id] || [];
-          const empTasks = taskData[emp.id] || [];
-          const taskCompletion = empTasks.length > 0 ? Math.round((empTasks.filter(t => t.completed).length / empTasks.length) * 100) : 0;
-
-          return (
-            <Card key={emp.id}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' }}>
-                <div>
-                  <h3 style={{ margin: '0 0 4px 0', color: '#111827', fontSize: '16px', fontWeight: '600' }}>{emp.name}</h3>
-                  <p style={{ margin: 0, color: '#6b7280', fontSize: '13px' }}>{position?.name}</p>
-                </div>
-                <span style={{ fontSize: '24px' }}>{position?.icon}</span>
-              </div>
-
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', marginBottom: '8px' }}>Tích lũy tác vụ</div>
-                <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${taskCompletion}%`, backgroundColor: '#059669', transition: 'width 0.3s' }} />
-                </div>
-                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>{taskCompletion}% ({empTasks.filter(t => t.completed).length}/{empTasks.length})</div>
-              </div>
-
-              {empKpis.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {empKpis.slice(0, 2).map(kpi => (
-                    <div key={kpi.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                      <span style={{ color: '#6b7280' }}>{kpi.name}</span>
-                      <span style={{ fontWeight: '600', color: getStatusColor(kpi.value, kpi.target, kpi.type) }}>
-                        {kpi.value}/{kpi.target}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// Add Employee Form
-function AddEmployeeForm({ onAdd, onClose }) {
-  const [name, setName] = useState('');
-  const [position, setPosition] = useState('GV');
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (name.trim()) {
-      onAdd(name, position);
-      setName('');
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
+  const handleAddEmployee = async () => {
+    if (!newEmployeeName.trim()) return;
+
+    try {
+      const empId = `emp_${Date.now()}`;
+      const newEmp = {
+        id: empId,
+        name: newEmployeeName,
+        position: newEmployeePosition,
+        createdAt: new Date().toISOString()
+      };
+
+      const docRef = doc(db, 'wowops', 'employees');
+      const docSnap = await getDoc(docRef);
+      const currentEmps = docSnap.exists() ? docSnap.data().value || [] : [];
+
+      await setDoc(docRef, { value: [...currentEmps, newEmp] });
+
+      // Auto-create daily tasks for today
+      const dailyTasks = positionKPIs[newEmployeePosition].dailyTasks.map(name => ({
+        name,
+        completed: false
+      }));
+
+      const tasksRef = doc(db, 'wowops', `emp_${empId}_tasks_${getDateString()}`);
+      await setDoc(tasksRef, { value: dailyTasks });
+
+      // Initialize empty KPI records
+      const weekKey = getWeekKey();
+      const emptyLeading = {};
+      const emptyLagging = {};
+
+      positionKPIs[newEmployeePosition].leading.forEach(kpi => {
+        emptyLeading[kpi.id] = 0;
+      });
+      positionKPIs[newEmployeePosition].lagging.forEach(kpi => {
+        emptyLagging[kpi.id] = 0;
+      });
+
+      await setDoc(doc(db, 'wowops', `emp_${empId}_leading_${weekKey}`), { value: emptyLeading });
+      await setDoc(doc(db, 'wowops', `emp_${empId}_lagging_${weekKey}`), { value: emptyLagging });
+      await setDoc(doc(db, 'wowops', `emp_${empId}_targets`), { value: {} });
+
+      setNewEmployeeName('');
+      setNewEmployeePosition('SL');
+      setShowAddEmployee(false);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error adding employee:', error);
+      alert('Lỗi: Không thể thêm nhân viên');
+    }
+  };
+
+  const dateRangeText = dateOffset === 0 ? 'Tuần này' : dateOffset === -1 ? 'Tuần trước' : 'Tháng này';
+  const totalTaskCompletion = employees.length > 0 ? Math.round(employees.reduce((a, b) => a + b.taskCompletion, 0) / employees.length) : 0;
+  const totalLeadingAvg = employees.length > 0 ? Math.round(employees.reduce((a, b) => a + b.leadingAvg, 0) / employees.length) : 0;
+  const totalLaggingAvg = employees.length > 0 ? Math.round(employees.reduce((a, b) => a + b.laggingAvg, 0) / employees.length) : 0;
+
   return (
-    <div style={{ maxWidth: '500px' }}>
-      <Card>
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#111827' }}>Tên nhân viên</label>
+    <div style={styles.container}>
+      <div style={styles.sidebar}>
+        <div style={styles.sidebarLogo}>WOW ART Ops</div>
+        <nav style={styles.nav}>
+          <div style={styles.navItem}>📊 Dashboard</div>
+          <div style={styles.navItem}>👥 Nhân viên</div>
+          <div style={styles.navItem}>📈 Báo cáo</div>
+        </nav>
+        <div style={styles.divider} />
+        <div style={styles.employeeList}>
+          <h3 style={styles.sectionTitle}>Nhân viên</h3>
+          {employees.length === 0 ? (
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textAlign: 'center' }}>Chưa có nhân viên</p>
+          ) : (
+            employees.map(emp => (
+              <div
+                key={emp.id}
+                onClick={() => onSelectEmployee(emp)}
+                style={styles.employeeListItem}
+              >
+                <span>{emp.name}</span>
+                <span style={styles.badge}>{emp.position}</span>
+              </div>
+            ))
+          )}
+          <button
+            onClick={() => setShowAddEmployee(true)}
+            style={styles.addEmployeeBtn}
+          >
+            + Thêm nhân viên
+          </button>
+        </div>
+        <button onClick={onLogout} style={styles.logoutBtn}>Đăng xuất</button>
+      </div>
+
+      <div style={styles.mainContent}>
+        <div style={styles.header}>
+          <h1 style={styles.pageTitle}>Dashboard</h1>
+          <div style={styles.dateButtons}>
+            <button
+              onClick={() => setDateOffset(0)}
+              style={{ ...styles.dateButton, backgroundColor: dateOffset === 0 ? '#10b981' : '#e5e7eb', color: dateOffset === 0 ? 'white' : '#374151' }}
+            >
+              Tuần này
+            </button>
+            <button
+              onClick={() => setDateOffset(-1)}
+              style={{ ...styles.dateButton, backgroundColor: dateOffset === -1 ? '#10b981' : '#e5e7eb', color: dateOffset === -1 ? 'white' : '#374151' }}
+            >
+              Tuần trước
+            </button>
+            <button
+              onClick={() => setDateOffset(-4)}
+              style={{ ...styles.dateButton, backgroundColor: dateOffset === -4 ? '#10b981' : '#e5e7eb', color: dateOffset === -4 ? 'white' : '#374151' }}
+            >
+              Tháng này
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <LoadingSkeleton />
+        ) : employees.length === 0 ? (
+          <EmptyState
+            message="Chưa có nhân viên nào"
+            actionText="Thêm nhân viên đầu tiên"
+            onAction={() => setShowAddEmployee(true)}
+          />
+        ) : (
+          <>
+            <div style={styles.summaryCards}>
+              <div style={styles.summaryCard}>
+                <div style={styles.cardLabel}>Tổng nhân viên</div>
+                <div style={styles.cardValue}>{employees.length}</div>
+              </div>
+              <div style={styles.summaryCard}>
+                <div style={styles.cardLabel}>Hoàn thành công việc</div>
+                <div style={styles.cardValue}>{totalTaskCompletion}%</div>
+              </div>
+              <div style={styles.summaryCard}>
+                <div style={styles.cardLabel}>KPI Hành động</div>
+                <div style={styles.cardValue}>{totalLeadingAvg}</div>
+              </div>
+              <div style={styles.summaryCard}>
+                <div style={styles.cardLabel}>KPI Kết quả</div>
+                <div style={styles.cardValue}>{totalLaggingAvg}</div>
+              </div>
+            </div>
+
+            <div style={styles.employeeGrid}>
+              {employees.map(emp => (
+                <div
+                  key={emp.id}
+                  onClick={() => onSelectEmployee(emp)}
+                  style={styles.employeeCard}
+                >
+                  <div style={styles.cardHeader}>
+                    <h3 style={styles.empName}>{emp.name}</h3>
+                    <span style={styles.positionBadge}>{emp.position}</span>
+                  </div>
+                  <div style={styles.cardMetric}>
+                    <span style={styles.metricLabel}>Công việc:</span>
+                    <div style={{ ...styles.progressBar, flex: 1 }}>
+                      <div
+                        style={{
+                          ...styles.progressFill,
+                          width: `${emp.taskCompletion}%`,
+                          backgroundColor: '#3b82f6'
+                        }}
+                      />
+                    </div>
+                    <span style={styles.metricValue}>{emp.taskCompletion}%</span>
+                  </div>
+                  <div style={styles.cardMetric}>
+                    <span style={styles.metricLabel}>KPI Hành động:</span>
+                    <span style={styles.metricValue}>{emp.leadingAvg}</span>
+                  </div>
+                  <div style={styles.cardMetric}>
+                    <span style={styles.metricLabel}>KPI Kết quả:</span>
+                    <span style={styles.metricValue}>{emp.laggingAvg}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {showAddEmployee && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <h2 style={styles.modalTitle}>Thêm nhân viên mới</h2>
             <input
               type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Nhập tên..."
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontFamily: 'inherit',
-                boxSizing: 'border-box'
-              }}
-              autoFocus
+              placeholder="Tên nhân viên"
+              value={newEmployeeName}
+              onChange={(e) => setNewEmployeeName(e.target.value)}
+              style={styles.input}
             />
-          </div>
-
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#111827' }}>Vị trí</label>
             <select
-              value={position}
-              onChange={(e) => setPosition(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontFamily: 'inherit',
-                boxSizing: 'border-box'
-              }}
+              value={newEmployeePosition}
+              onChange={(e) => setNewEmployeePosition(e.target.value)}
+              style={styles.select}
             >
-              {Object.entries(POSITIONS).map(([key, val]) => (
-                <option key={key} value={key}>{val.name}</option>
+              {Object.entries(positionNames).map(([key, name]) => (
+                <option key={key} value={key}>{name}</option>
               ))}
             </select>
+            <div style={styles.modalButtons}>
+              <button onClick={handleAddEmployee} style={styles.primaryBtn}>
+                Thêm nhân viên
+              </button>
+              <button onClick={() => setShowAddEmployee(false)} style={styles.secondaryBtn}>
+                Hủy
+              </button>
+            </div>
           </div>
-
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button
-              type="submit"
-              style={{
-                flex: 1,
-                padding: '12px',
-                backgroundColor: '#059669',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              Thêm
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                flex: 1,
-                padding: '12px',
-                backgroundColor: '#f3f4f6',
-                color: '#111827',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              Hủy
-            </button>
-          </div>
-        </form>
-      </Card>
+        </div>
+      )}
     </div>
   );
 }
 
-// Weekly Setup Page
-function WeeklySetupPage({ employees, weekKey }) {
-  return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
-        <p style={{ color: '#6b7280' }}>Thiết lập KPI và tác vụ cho tuần {weekKey}</p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '24px' }}>
-        {employees.map(emp => (
-          <WeeklySetupCard key={emp.id} employee={emp} weekKey={weekKey} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Weekly Setup Card
-function WeeklySetupCard({ employee, weekKey }) {
-  const [kpis, setKpis] = useState(POSITIONS[employee.position].kpis);
-  const [tasks, setTasks] = useState(POSITIONS[employee.position].tasks);
-  const position = POSITIONS[employee.position];
-
-  const handleKpiChange = (idx, value) => {
-    const updated = [...kpis];
-    updated[idx].target = parseFloat(value);
-    setKpis(updated);
-  };
-
-  const handleSave = async () => {
-    try {
-      await setDoc(doc(db, 'wowops', `employee_${employee.id}_kpis_${weekKey}`), {
-        kpis: kpis.map(k => ({ ...k, value: 0 })),
-        weekKey
-      });
-      await setDoc(doc(db, 'wowops', `employee_${employee.id}_tasks_${weekKey}`), {
-        tasks: tasks.map(t => ({ ...t, completed: false })),
-        weekKey
-      });
-      alert('Đã lưu!');
-    } catch (err) {
-      alert('Lỗi: ' + err.message);
-    }
-  };
-
-  return (
-    <Card>
-      <div style={{ marginBottom: '16px' }}>
-        <h3 style={{ margin: '0 0 4px 0', color: '#111827', fontSize: '16px', fontWeight: '600' }}>
-          {position.icon} {employee.name}
-        </h3>
-        <p style={{ margin: 0, color: '#6b7280', fontSize: '13px' }}>{position.name}</p>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <h4 style={{ color: '#6b7280', fontSize: '12px', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase' }}>KPI Mục tiêu</h4>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {kpis.map((kpi, idx) => (
-            <div key={kpi.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ flex: 1, fontSize: '13px', color: '#111827' }}>{kpi.name}</span>
-              <input
-                type="number"
-                value={kpi.target}
-                onChange={(e) => handleKpiChange(idx, e.target.value)}
-                style={{
-                  width: '80px',
-                  padding: '6px 8px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '4px',
-                  fontSize: '13px'
-                }}
-              />
-              <span style={{ fontSize: '12px', color: '#9ca3af' }}>{kpi.unit}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <h4 style={{ color: '#6b7280', fontSize: '12px', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase' }}>Tác vụ hàng ngày</h4>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {tasks.map((task, idx) => (
-            <div key={idx} style={{ padding: '10px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px', color: '#111827' }}>
-              ✓ {task.name}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <button
-        onClick={handleSave}
-        style={{
-          width: '100%',
-          padding: '10px',
-          backgroundColor: '#059669',
-          color: 'white',
-          border: 'none',
-          borderRadius: '6px',
-          fontWeight: '600',
-          cursor: 'pointer',
-          fontSize: '14px'
-        }}
-      >
-        Lưu thiết lập
-      </button>
-    </Card>
-  );
-}
-
-// Employee Detail Page
-function EmployeeDetailPage({ empId, weekKey, employees }) {
-  const [kpis, setKpis] = useState([]);
-  const [tasks, setTasks] = useState([]);
+// Manager Employee Detail
+function EmployeeDetail({ employee, onBack, onLogout }) {
+  const [activeTab, setActiveTab] = useState('leading');
+  const [leadingData, setLeadingData] = useState({});
+  const [laggingData, setLaggingData] = useState({});
+  const [customTargets, setCustomTargets] = useState({});
   const [feedback, setFeedback] = useState('');
   const [rating, setRating] = useState(5);
+  const [editingKPI, setEditingKPI] = useState(null);
+  const [editValue, setEditValue] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const employee = employees.find(e => e.id === empId);
-  const position = POSITIONS[employee?.position];
+  const posKPIs = positionKPIs[employee.position];
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const kpiRef = doc(db, 'wowops', `employee_${empId}_kpis_${weekKey}`);
-        const kpiSnap = await getDoc(kpiRef);
-        if (kpiSnap.exists()) setKpis(kpiSnap.data().kpis);
+    fetchData();
+  }, [employee.id]);
 
-        const taskRef = doc(db, 'wowops', `employee_${empId}_tasks_${weekKey}`);
-        const taskSnap = await getDoc(taskRef);
-        if (taskSnap.exists()) setTasks(taskSnap.data().tasks);
-
-        const reviewRef = doc(db, 'wowops', `employee_${empId}_review_${weekKey}`);
-        const reviewSnap = await getDoc(reviewRef);
-        if (reviewSnap.exists()) {
-          setFeedback(reviewSnap.data().feedback);
-          setRating(reviewSnap.data().rating);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    if (empId) load();
-  }, [empId, weekKey]);
-
-  const handleKpiUpdate = async (kpiId, value) => {
+  const fetchData = async () => {
     try {
-      const kpiRef = doc(db, 'wowops', `employee_${empId}_kpis_${weekKey}`);
-      const updated = kpis.map(k => k.id === kpiId ? { ...k, value: parseFloat(value) } : k);
-      await updateDoc(kpiRef, { kpis: updated });
-      setKpis(updated);
-    } catch (err) {
-      console.error(err);
+      setLoading(true);
+      const weekKey = getWeekKey();
+
+      const leadingRef = doc(db, 'wowops', `emp_${employee.id}_leading_${weekKey}`);
+      const laggingRef = doc(db, 'wowops', `emp_${employee.id}_lagging_${weekKey}`);
+      const targetsRef = doc(db, 'wowops', `emp_${employee.id}_targets`);
+      const reviewRef = doc(db, 'wowops', `emp_${employee.id}_review_${weekKey}`);
+
+      const leadingSnap = await getDoc(leadingRef);
+      const laggingSnap = await getDoc(laggingRef);
+      const targetsSnap = await getDoc(targetsRef);
+      const reviewSnap = await getDoc(reviewRef);
+
+      setLeadingData(leadingSnap.exists() ? leadingSnap.data().value || {} : {});
+      setLaggingData(laggingSnap.exists() ? laggingSnap.data().value || {} : {});
+      setCustomTargets(targetsSnap.exists() ? targetsSnap.data().value || {} : {});
+
+      if (reviewSnap.exists()) {
+        const reviewData = reviewSnap.data().value;
+        setFeedback(reviewData.feedback || '');
+        setRating(reviewData.rating || 5);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleTaskToggle = async (idx) => {
+  const handleEditTarget = (kpiId, currentValue) => {
+    setEditingKPI(kpiId);
+    setEditValue(currentValue.toString());
+  };
+
+  const handleSaveTarget = async (kpiId) => {
     try {
-      const taskRef = doc(db, 'wowops', `employee_${empId}_tasks_${weekKey}`);
-      const updated = [...tasks];
-      updated[idx].completed = !updated[idx].completed;
-      await updateDoc(taskRef, { tasks: updated });
-      setTasks(updated);
-    } catch (err) {
-      console.error(err);
+      const newTargets = { ...customTargets, [kpiId]: parseInt(editValue) || 0 };
+      const targetsRef = doc(db, 'wowops', `emp_${employee.id}_targets`);
+      await setDoc(targetsRef, { value: newTargets });
+      setCustomTargets(newTargets);
+      setEditingKPI(null);
+    } catch (error) {
+      console.error('Error saving target:', error);
+      alert('Lỗi: Không thể lưu mục tiêu');
     }
   };
 
   const handleSaveFeedback = async () => {
     try {
-      const reviewRef = doc(db, 'wowops', `employee_${empId}_review_${weekKey}`);
-      await setDoc(reviewRef, { feedback, rating, date: new Date().toISOString() });
-      alert('Đã lưu phản hồi!');
-    } catch (err) {
-      alert('Lỗi: ' + err.message);
+      const weekKey = getWeekKey();
+      const reviewRef = doc(db, 'wowops', `emp_${employee.id}_review_${weekKey}`);
+      await setDoc(reviewRef, {
+        value: {
+          feedback,
+          rating,
+          date: new Date().toISOString()
+        }
+      });
+      alert('Lưu feedback thành công!');
+    } catch (error) {
+      console.error('Error saving feedback:', error);
+      alert('Lỗi: Không thể lưu feedback');
     }
   };
 
-  if (loading) return <div style={{ color: '#6b7280' }}>Đang tải...</div>;
+  const getTarget = (kpiId, defaultTarget) => {
+    return customTargets[kpiId] !== undefined ? customTargets[kpiId] : defaultTarget;
+  };
+
+  const renderKPIGrid = (kpis, data) => (
+    <div style={styles.kpiGrid}>
+      {kpis.map(kpi => {
+        const value = data[kpi.id] || 0;
+        const target = getTarget(kpi.id, kpi.target);
+        const percentage = target > 0 ? Math.min((value / target) * 100, 100) : 0;
+        const isEditing = editingKPI === kpi.id;
+
+        return (
+          <div key={kpi.id} style={styles.kpiCard}>
+            <div style={styles.kpiHeader}>
+              <span style={styles.kpiName}>{kpi.name}</span>
+              <button
+                onClick={() => handleEditTarget(kpi.id, target)}
+                style={styles.editBtn}
+              >
+                ✏️
+              </button>
+            </div>
+            <div style={styles.kpiValue}>
+              {value} / {target} {kpi.unit}
+            </div>
+            <div style={styles.progressBar}>
+              <div
+                style={{
+                  ...styles.progressFill,
+                  width: `${percentage}%`,
+                  backgroundColor: percentage >= 100 ? '#10b981' : '#f59e0b'
+                }}
+              />
+            </div>
+            {isEditing && (
+              <div style={styles.editField}>
+                <input
+                  type="number"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  style={styles.input}
+                  placeholder="Nhập mục tiêu mới"
+                />
+                <button
+                  onClick={() => handleSaveTarget(kpi.id)}
+                  style={styles.saveBtn}
+                >
+                  ✓
+                </button>
+                <button
+                  onClick={() => setEditingKPI(null)}
+                  style={styles.cancelBtn}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.sidebar} />
+        <div style={styles.mainContent}>
+          <LoadingSkeleton />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ maxWidth: '1000px' }}>
-      <div style={{ marginBottom: '32px' }}>
-        <h2 style={{ margin: '0 0 8px 0', fontSize: '28px', fontWeight: '700', color: '#111827' }}>
-          {position?.icon} {employee?.name}
-        </h2>
-        <p style={{ margin: 0, color: '#6b7280' }}>{position?.name} • Tuần {weekKey}</p>
+    <div style={styles.container}>
+      <div style={styles.sidebar}>
+        <div style={styles.sidebarLogo}>WOW ART Ops</div>
+        <button onClick={onBack} style={styles.backBtn}>← Quay lại</button>
+        <button onClick={onLogout} style={styles.logoutBtn}>Đăng xuất</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
-        <Card>
-          <h3 style={{ margin: '0 0 16px 0', color: '#111827', fontSize: '16px', fontWeight: '600' }}>KPI Tuần này</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {kpis.map(kpi => (
-              <div key={kpi.id}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#111827' }}>{kpi.name}</label>
-                  <span style={{ fontSize: '13px', color: '#6b7280' }}>{kpi.unit}</span>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <input
-                    type="number"
-                    value={kpi.value}
-                    onChange={(e) => handleKpiUpdate(kpi.id, e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '6px',
-                      fontSize: '13px'
-                    }}
-                  />
-                  <span style={{ fontSize: '12px', color: '#6b7280', minWidth: '40px' }}>Mục: {kpi.target}</span>
-                </div>
-                <div style={{ height: '6px', backgroundColor: '#f3f4f6', borderRadius: '3px', marginTop: '8px', overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%',
-                    width: `${Math.min((kpi.value / kpi.target) * 100, 100)}%`,
-                    backgroundColor: getStatusColor(kpi.value, kpi.target, kpi.type)
-                  }} />
-                </div>
-              </div>
-            ))}
+      <div style={styles.mainContent}>
+        <div style={styles.header}>
+          <div>
+            <h1 style={styles.pageTitle}>{employee.name}</h1>
+            <p style={styles.subtitle}>{positionNames[employee.position]}</p>
           </div>
-        </Card>
+        </div>
 
-        <Card>
-          <h3 style={{ margin: '0 0 16px 0', color: '#111827', fontSize: '16px', fontWeight: '600' }}>Tác vụ hàng ngày</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {tasks.map((task, idx) => (
-              <label key={idx} style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '12px',
-                backgroundColor: task.completed ? '#f0fdf4' : '#f9fafb',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s'
-              }}>
+        <div style={styles.tabBar}>
+          {['leading', 'lagging', 'tasks', 'feedback'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                ...styles.tabButton,
+                borderBottom: activeTab === tab ? '3px solid #10b981' : 'none',
+                color: activeTab === tab ? '#10b981' : '#6b7280'
+              }}
+            >
+              {tab === 'leading' && '📈 KPI Hành động'}
+              {tab === 'lagging' && '🎯 KPI Kết quả'}
+              {tab === 'tasks' && '✓ Công việc'}
+              {tab === 'feedback' && '💬 Feedback'}
+            </button>
+          ))}
+        </div>
+
+        <div style={styles.tabContent}>
+          {activeTab === 'leading' && renderKPIGrid(posKPIs.leading, leadingData)}
+          {activeTab === 'lagging' && renderKPIGrid(posKPIs.lagging, laggingData)}
+          {activeTab === 'tasks' && (
+            <EmptyState message="Xem công việc hàng ngày trong giao diện nhân viên" />
+          )}
+          {activeTab === 'feedback' && (
+            <div style={styles.feedbackForm}>
+              <h3 style={styles.formTitle}>Feedback cho tuần này</h3>
+              <textarea
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Nhập feedback cho nhân viên..."
+                style={styles.textarea}
+              />
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Đánh giá (1-10):</label>
                 <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => handleTaskToggle(idx)}
-                  style={{ marginRight: '12px', cursor: 'pointer' }}
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={rating}
+                  onChange={(e) => setRating(Math.min(10, Math.max(1, parseInt(e.target.value))))}
+                  style={styles.input}
                 />
-                <span style={{
-                  flex: 1,
-                  fontSize: '13px',
-                  color: task.completed ? '#059669' : '#111827',
-                  textDecoration: task.completed ? 'line-through' : 'none'
-                }}>
-                  {task.name}
-                </span>
-              </label>
-            ))}
-          </div>
-          <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f0fdf4', borderRadius: '6px', fontSize: '12px', color: '#059669', fontWeight: '600' }}>
-            {tasks.filter(t => t.completed).length}/{tasks.length} hoàn thành
-          </div>
-        </Card>
+              </div>
+              <button onClick={handleSaveFeedback} style={styles.primaryBtn}>
+                Lưu Feedback
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-
-      <Card>
-        <h3 style={{ margin: '0 0 16px 0', color: '#111827', fontSize: '16px', fontWeight: '600' }}>Phản hồi tuần</h3>
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '500', color: '#111827' }}>Xếp hạng (1-10)</label>
-          <input
-            type="number"
-            min="1"
-            max="10"
-            value={rating}
-            onChange={(e) => setRating(parseInt(e.target.value))}
-            style={{
-              width: '80px',
-              padding: '8px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '14px'
-            }}
-          />
-        </div>
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '500', color: '#111827' }}>Nhận xét</label>
-          <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="Nhập nhận xét..."
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontFamily: 'inherit',
-              resize: 'vertical',
-              minHeight: '100px',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
-        <button
-          onClick={handleSaveFeedback}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#059669',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            fontSize: '14px'
-          }}
-        >
-          Lưu phản hồi
-        </button>
-      </Card>
     </div>
   );
 }
 
-// Reports Page
-function ReportsPage({ employees }) {
-  const [selectedEmployee, setSelectedEmployee] = useState(employees[0]?.id || '');
-  const [kpiHistory, setKpiHistory] = useState([]);
+// Employee Interface
+function EmployeeInterface({ employeeId, employeeName, onLogout }) {
+  const [activeTab, setActiveTab] = useState('tasks');
+  const [tasks, setTasks] = useState([]);
+  const [leadingData, setLeadingData] = useState({});
+  const [laggingData, setLaggingData] = useState({});
+  const [feedback, setFeedback] = useState('');
+  const [rating, setRating] = useState(0);
+  const [employee, setEmployee] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [debounceTimer, setDebounceTimer] = useState(null);
 
   useEffect(() => {
-    const loadHistory = async () => {
-      if (!selectedEmployee) return;
-      try {
-        setLoading(true);
-        const mockData = [
-          { week: 'W1', value: 3, target: 5 },
-          { week: 'W2', value: 4, target: 5 },
-          { week: 'W3', value: 5, target: 5 },
-          { week: 'W4', value: 4, target: 5 }
-        ];
-        setKpiHistory(mockData);
-      } finally {
-        setLoading(false);
+    fetchEmployeeData();
+  }, [employeeId]);
+
+  const fetchEmployeeData = async () => {
+    try {
+      setLoading(true);
+      const docRef = doc(db, 'wowops', 'employees');
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const emps = docSnap.data().value || [];
+        const emp = emps.find(e => e.id === employeeId);
+        setEmployee(emp);
+
+        if (emp) {
+          const dateStr = getDateString();
+          const weekKey = getWeekKey();
+
+          const tasksRef = doc(db, 'wowops', `emp_${employeeId}_tasks_${dateStr}`);
+          const leadingRef = doc(db, 'wowops', `emp_${employeeId}_leading_${weekKey}`);
+          const laggingRef = doc(db, 'wowops', `emp_${employeeId}_lagging_${weekKey}`);
+          const reviewRef = doc(db, 'wowops', `emp_${employeeId}_review_${weekKey}`);
+
+          const tasksSnap = await getDoc(tasksRef);
+          const leadingSnap = await getDoc(leadingRef);
+          const laggingSnap = await getDoc(laggingRef);
+          const reviewSnap = await getDoc(reviewRef);
+
+          setTasks(tasksSnap.exists() ? tasksSnap.data().value || [] : []);
+          setLeadingData(leadingSnap.exists() ? leadingSnap.data().value || {} : {});
+          setLaggingData(laggingSnap.exists() ? laggingSnap.data().value || {} : {});
+
+          if (reviewSnap.exists()) {
+            const reviewData = reviewSnap.data().value;
+            setFeedback(reviewData.feedback || '');
+            setRating(reviewData.rating || 0);
+          }
+        }
       }
-    };
-    loadHistory();
-  }, [selectedEmployee]);
+    } catch (error) {
+      console.error('Error fetching employee data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTaskToggle = async (index) => {
+    try {
+      const updatedTasks = [...tasks];
+      updatedTasks[index].completed = !updatedTasks[index].completed;
+
+      const dateStr = getDateString();
+      const tasksRef = doc(db, 'wowops', `emp_${employeeId}_tasks_${dateStr}`);
+      await setDoc(tasksRef, { value: updatedTasks });
+
+      setTasks(updatedTasks);
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
+  };
+
+  const handleKPIChange = async (kpiId, value, type) => {
+    const numValue = parseInt(value) || 0;
+    const weekKey = getWeekKey();
+
+    if (type === 'leading') {
+      const newData = { ...leadingData, [kpiId]: numValue };
+      setLeadingData(newData);
+
+      clearTimeout(debounceTimer);
+      setDebounceTimer(
+        setTimeout(async () => {
+          try {
+            const ref = doc(db, 'wowops', `emp_${employeeId}_leading_${weekKey}`);
+            await setDoc(ref, { value: newData });
+          } catch (error) {
+            console.error('Error saving KPI:', error);
+          }
+        }, 500)
+      );
+    } else {
+      const newData = { ...laggingData, [kpiId]: numValue };
+      setLaggingData(newData);
+
+      clearTimeout(debounceTimer);
+      setDebounceTimer(
+        setTimeout(async () => {
+          try {
+            const ref = doc(db, 'wowops', `emp_${employeeId}_lagging_${weekKey}`);
+            await setDoc(ref, { value: newData });
+          } catch (error) {
+            console.error('Error saving KPI:', error);
+          }
+        }, 500)
+      );
+    }
+  };
+
+  if (!employee || loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.sidebar} />
+        <div style={styles.mainContent}>
+          <LoadingSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  const posKPIs = positionKPIs[employee.position];
+  const taskCompletion = tasks.length > 0
+    ? Math.round((tasks.filter(t => t.completed).length / tasks.length) * 100)
+    : 0;
+
+  const leadingChartData = posKPIs.leading.map(kpi => ({
+    name: kpi.name.substring(0, 12),
+    actual: leadingData[kpi.id] || 0,
+    target: kpi.target
+  }));
+
+  const laggingChartData = posKPIs.lagging.map(kpi => ({
+    name: kpi.name.substring(0, 12),
+    actual: laggingData[kpi.id] || 0,
+    target: kpi.target
+  }));
 
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
-        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#111827' }}>Chọn nhân viên</label>
-        <select
-          value={selectedEmployee}
-          onChange={(e) => setSelectedEmployee(e.target.value)}
-          style={{
-            padding: '10px 12px',
-            border: '1px solid #d1d5db',
-            borderRadius: '6px',
-            fontSize: '14px',
-            fontFamily: 'inherit',
-            width: '200px'
-          }}
-        >
-          {employees.map(emp => (
-            <option key={emp.id} value={emp.id}>{emp.name}</option>
-          ))}
-        </select>
+    <div style={styles.container}>
+      <div style={styles.sidebar}>
+        <div style={styles.sidebarLogo}>WOW ART Ops</div>
+        <div style={styles.empHeader}>
+          <div style={styles.empName}>{employee.name}</div>
+          <div style={styles.empPosition}>{positionNames[employee.position]}</div>
+        </div>
+        <nav style={styles.nav}>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'tasks' ? 'rgba(255,255,255,0.2)' : 'transparent'
+            }}
+          >
+            ✓ Tasks hôm nay
+          </button>
+          <button
+            onClick={() => setActiveTab('kpi')}
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'kpi' ? 'rgba(255,255,255,0.2)' : 'transparent'
+            }}
+          >
+            📊 Nhập KPI
+          </button>
+          <button
+            onClick={() => setActiveTab('progress')}
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'progress' ? 'rgba(255,255,255,0.2)' : 'transparent'
+            }}
+          >
+            📈 Tiến độ
+          </button>
+          <button
+            onClick={() => setActiveTab('feedback')}
+            style={{
+              ...styles.navItem,
+              backgroundColor: activeTab === 'feedback' ? 'rgba(255,255,255,0.2)' : 'transparent'
+            }}
+          >
+            💬 Feedback
+          </button>
+        </nav>
+        <button onClick={onLogout} style={styles.logoutBtn}>Đăng xuất</button>
       </div>
 
-      <Card>
-        <h3 style={{ margin: '0 0 24px 0', color: '#111827', fontSize: '16px', fontWeight: '600' }}>Xu hướng KPI</h3>
-        {loading ? (
-          <div style={{ color: '#6b7280' }}>Đang tải...</div>
-        ) : (
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={kpiHistory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-              <XAxis dataKey="week" stroke="#9ca3af" />
-              <YAxis stroke="#9ca3af" />
-              <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }} />
-              <Legend />
-              <Line type="monotone" dataKey="value" stroke="#059669" name="Thực tế" dot={{ fill: '#059669' }} />
-              <Line type="monotone" dataKey="target" stroke="#d1d5db" name="Mục tiêu" strokeDasharray="5 5" dot={{ fill: '#d1d5db' }} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </Card>
-    </div>
-  );
-}
+      <div style={styles.mainContent}>
+        <div style={styles.header}>
+          <h1 style={styles.pageTitle}>
+            {activeTab === 'tasks' && 'Tasks hôm nay'}
+            {activeTab === 'kpi' && 'Nhập KPI'}
+            {activeTab === 'progress' && 'Tiến độ'}
+            {activeTab === 'feedback' && 'Feedback'}
+          </h1>
+          <p style={styles.dateDisplay}>{formatDate(new Date())}</p>
+        </div>
 
-// Card Component
-function Card({ children, style }) {
-  return (
-    <div style={{
-      backgroundColor: 'white',
-      borderRadius: '12px',
-      border: '1px solid #f3f4f6',
-      padding: '20px',
-      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-      ...style
-    }}>
-      {children}
-    </div>
-  );
-}
+        {activeTab === 'tasks' && (
+          <div style={styles.tasksSection}>
+            <div style={styles.progressBar}>
+              <div
+                style={{
+                  ...styles.progressFill,
+                  width: `${taskCompletion}%`,
+                  backgroundColor: '#3b82f6'
+                }}
+              />
+            </div>
+            <p style={styles.progressText}>{taskCompletion}% hoàn thành</p>
+
+            {tasks.length === 0 ? (
+              <EmptyState message="Không có công việc hôm nay" />
+            ) : (
+              <div style={styles.tasksList}>
+                {tasks.map((task, index) => (
+                  <div key={index} style={styles.taskItem}>
+                    <input
+                      type="checkbox"
+                      checked={tas
