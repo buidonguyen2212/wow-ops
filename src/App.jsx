@@ -143,6 +143,32 @@ const formatDate = (date) => {
   return date.toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
+// ========== AUTH HELPERS ==========
+const hashPassword = async (password) => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`wowart_salt_${password}`);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+};
+
+const getManagerAuth = async () => {
+  try {
+    const ref = doc(db, 'wowops', 'auth');
+    const snap = await getDoc(ref);
+    return snap.exists() ? snap.data().value || null : null;
+  } catch (e) {
+    console.error('getManagerAuth error', e);
+    return null;
+  }
+};
+
+const setManagerAuth = async (passwordHash) => {
+  const ref = doc(db, 'wowops', 'auth');
+  await setDoc(ref, { value: { managerPasswordHash: passwordHash, updatedAt: new Date().toISOString() } });
+};
+
 // Loading Skeleton Component
 function LoadingSkeleton() {
   return (
@@ -170,15 +196,38 @@ function EmptyState({ message, actionText, onAction }) {
 function LoginScreen({ onLogin }) {
   const [role, setRole] = useState(null);
   const [employees, setEmployees] = useState([]);
-  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [managerAuthState, setManagerAuthState] = useState(null); // null | 'setup' | 'login'
+  const [errorMsg, setErrorMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
 
+  // Khi chọn role, load data tương ứng
   useEffect(() => {
-    if (role === 'employee') {
+    setErrorMsg('');
+    setPassword('');
+    setConfirmPassword('');
+    if (role === 'manager') {
+      checkManagerAuth();
+    } else if (role === 'employee') {
       fetchEmployees();
     }
   }, [role]);
+
+  const checkManagerAuth = async () => {
+    setLoading(true);
+    const auth = await getManagerAuth();
+    if (!auth || !auth.managerPasswordHash) {
+      setManagerAuthState('setup');
+    } else {
+      setManagerAuthState('login');
+    }
+    setLoading(false);
+  };
 
   const fetchEmployees = async () => {
     try {
@@ -195,11 +244,78 @@ function LoginScreen({ onLogin }) {
     }
   };
 
-  const handleLogin = () => {
-    if (role === 'manager') {
+  const handleManagerSetup = async () => {
+    setErrorMsg('');
+    if (password.length < 6) {
+      setErrorMsg('Mật khẩu phải có ít nhất 6 ký tự');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMsg('Mật khẩu xác nhận không khớp');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      const hash = await hashPassword(password);
+      await setManagerAuth(hash);
       onLogin({ role: 'manager' });
-    } else if (selectedEmployee) {
-      onLogin({ role: 'employee', employeeId: selectedEmployee.id, employeeName: selectedEmployee.name });
+    } catch (e) {
+      console.error(e);
+      setErrorMsg('Lỗi khi khởi tạo mật khẩu. Thử lại.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleManagerLogin = async () => {
+    setErrorMsg('');
+    if (!password) {
+      setErrorMsg('Vui lòng nhập mật khẩu');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      const auth = await getManagerAuth();
+      const hash = await hashPassword(password);
+      if (auth?.managerPasswordHash === hash) {
+        onLogin({ role: 'manager' });
+      } else {
+        setErrorMsg('Sai mật khẩu quản lý');
+      }
+    } catch (e) {
+      setErrorMsg('Lỗi đăng nhập. Thử lại.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleEmployeeLogin = async () => {
+    setErrorMsg('');
+    const emp = employees.find(x => x.id === selectedEmployeeId);
+    if (!emp) {
+      setErrorMsg('Vui lòng chọn nhân viên');
+      return;
+    }
+    if (!emp.passwordHash) {
+      setErrorMsg('Tài khoản chưa được cấp mật khẩu. Liên hệ quản lý.');
+      return;
+    }
+    if (!password) {
+      setErrorMsg('Vui lòng nhập mật khẩu');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      const hash = await hashPassword(password);
+      if (emp.passwordHash === hash) {
+        onLogin({ role: 'employee', employeeId: emp.id, employeeName: emp.name });
+      } else {
+        setErrorMsg('Sai mật khẩu nhân viên');
+      }
+    } catch (e) {
+      setErrorMsg('Lỗi đăng nhập. Thử lại.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -207,78 +323,157 @@ function LoginScreen({ onLogin }) {
     emp.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const resetAll = () => {
+    setRole(null);
+    setSelectedEmployeeId('');
+    setSearchTerm('');
+    setPassword('');
+    setConfirmPassword('');
+    setErrorMsg('');
+    setManagerAuthState(null);
+  };
+
   return (
     <div style={styles.loginContainer}>
       <div style={styles.loginCard}>
         <div style={styles.logo}>WOW ART</div>
         <h1 style={styles.loginTitle}>Hệ thống quản lý hiệu suất</h1>
 
-        {!role ? (
+        {!role && (
           <div style={styles.roleButtons}>
             <button
               onClick={() => setRole('manager')}
               style={{ ...styles.roleButton, backgroundColor: '#10b981' }}
             >
-              Đăng nhập Quản lý
+              🛡️ Đăng nhập Quản lý
             </button>
             <button
               onClick={() => setRole('employee')}
               style={{ ...styles.roleButton, backgroundColor: '#3b82f6' }}
             >
-              Đăng nhập Nhân viên
+              👤 Đăng nhập Nhân viên
             </button>
           </div>
-        ) : role === 'manager' ? (
+        )}
+
+        {role === 'manager' && loading && <LoadingSkeleton />}
+
+        {role === 'manager' && !loading && managerAuthState === 'setup' && (
           <div style={styles.formGroup}>
+            <div style={styles.infoBox}>
+              🔐 Đây là lần đầu sử dụng. Vui lòng tạo mật khẩu quản lý.
+            </div>
+            <label style={styles.label}>Mật khẩu mới (tối thiểu 6 ký tự)</label>
+            <input
+              type={showPwd ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={styles.input}
+              placeholder="••••••"
+              autoFocus
+            />
+            <label style={styles.label}>Xác nhận mật khẩu</label>
+            <input
+              type={showPwd ? 'text' : 'password'}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleManagerSetup()}
+              style={styles.input}
+              placeholder="••••••"
+            />
+            <label style={styles.checkRow}>
+              <input type="checkbox" checked={showPwd} onChange={() => setShowPwd(!showPwd)} /> Hiện mật khẩu
+            </label>
+            {errorMsg && <div style={styles.errorBox}>{errorMsg}</div>}
             <button
-              onClick={handleLogin}
+              onClick={handleManagerSetup}
+              disabled={submitting}
               style={{ ...styles.loginBtn, backgroundColor: '#10b981' }}
             >
-              Vào Dashboard
+              {submitting ? 'Đang tạo...' : 'Tạo mật khẩu & Đăng nhập'}
             </button>
-            <button
-              onClick={() => setRole(null)}
-              style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}
-            >
+            <button onClick={resetAll} style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}>
               Quay lại
             </button>
           </div>
-        ) : (
+        )}
+
+        {role === 'manager' && !loading && managerAuthState === 'login' && (
           <div style={styles.formGroup}>
-            <label style={styles.label}>Tìm và chọn nhân viên:</label>
+            <label style={styles.label}>Mật khẩu quản lý</label>
+            <input
+              type={showPwd ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleManagerLogin()}
+              style={styles.input}
+              placeholder="••••••"
+              autoFocus
+            />
+            <label style={styles.checkRow}>
+              <input type="checkbox" checked={showPwd} onChange={() => setShowPwd(!showPwd)} /> Hiện mật khẩu
+            </label>
+            {errorMsg && <div style={styles.errorBox}>{errorMsg}</div>}
+            <button
+              onClick={handleManagerLogin}
+              disabled={submitting}
+              style={{ ...styles.loginBtn, backgroundColor: '#10b981' }}
+            >
+              {submitting ? 'Đang đăng nhập...' : 'Đăng nhập'}
+            </button>
+            <button onClick={resetAll} style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}>
+              Quay lại
+            </button>
+          </div>
+        )}
+
+        {role === 'employee' && (
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Tìm và chọn nhân viên</label>
             <input
               type="text"
-              placeholder="Tìm kiếm tên nhân viên..."
+              placeholder="🔍 Tìm kiếm tên nhân viên..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={styles.input}
             />
             <select
-              value={selectedEmployee?.id || ''}
-              onChange={(e) => {
-                const emp = employees.find(e => e.id === e.target.value);
-                setSelectedEmployee(emp);
-              }}
+              value={selectedEmployeeId}
+              onChange={(e) => setSelectedEmployeeId(e.target.value)}
               style={styles.select}
             >
               <option value="">-- Chọn nhân viên --</option>
               {filteredEmployees.map(emp => (
                 <option key={emp.id} value={emp.id}>
-                  {emp.name} ({positionNames[emp.position]})
+                  {emp.name} ({positionNames[emp.position] || emp.position})
                 </option>
               ))}
             </select>
+            <label style={styles.label}>Mật khẩu</label>
+            <input
+              type={showPwd ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleEmployeeLogin()}
+              style={styles.input}
+              placeholder="••••••"
+            />
+            <label style={styles.checkRow}>
+              <input type="checkbox" checked={showPwd} onChange={() => setShowPwd(!showPwd)} /> Hiện mật khẩu
+            </label>
+            {errorMsg && <div style={styles.errorBox}>{errorMsg}</div>}
             <button
-              onClick={handleLogin}
-              disabled={!selectedEmployee}
-              style={{ ...styles.loginBtn, backgroundColor: selectedEmployee ? '#3b82f6' : '#d1d5db', cursor: selectedEmployee ? 'pointer' : 'not-allowed' }}
+              onClick={handleEmployeeLogin}
+              disabled={submitting || !selectedEmployeeId}
+              style={{
+                ...styles.loginBtn,
+                backgroundColor: (selectedEmployeeId && !submitting) ? '#3b82f6' : '#d1d5db',
+                cursor: (selectedEmployeeId && !submitting) ? 'pointer' : 'not-allowed'
+              }}
             >
-              Đăng nhập
+              {submitting ? 'Đang đăng nhập...' : 'Đăng nhập'}
             </button>
-            <button
-              onClick={() => { setRole(null); setSearchTerm(''); setSelectedEmployee(null); }}
-              style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}
-            >
+            <button onClick={resetAll} style={{ ...styles.loginBtn, backgroundColor: '#6b7280' }}>
               Quay lại
             </button>
           </div>
@@ -296,6 +491,24 @@ function ManagerDashboard({ onLogout, onSelectEmployee }) {
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [newEmployeeName, setNewEmployeeName] = useState('');
   const [newEmployeePosition, setNewEmployeePosition] = useState('SL');
+  const [newEmployeePassword, setNewEmployeePassword] = useState('');
+
+  const [search, setSearch] = useState('');
+  const [activeView, setActiveView] = useState('dashboard'); // dashboard | employees | settings
+
+  // Password modal state
+  const [pwdModal, setPwdModal] = useState(null); // { employee }
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdError, setPwdError] = useState('');
+
+  // Delete confirm
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { employee }
+
+  // Settings - change manager password
+  const [oldMgrPwd, setOldMgrPwd] = useState('');
+  const [newMgrPwd, setNewMgrPwd] = useState('');
+  const [confirmMgrPwd, setConfirmMgrPwd] = useState('');
+  const [settingsMsg, setSettingsMsg] = useState('');
 
   useEffect(() => {
     fetchEmployees();
@@ -359,14 +572,23 @@ function ManagerDashboard({ onLogout, onSelectEmployee }) {
   };
 
   const handleAddEmployee = async () => {
-    if (!newEmployeeName.trim()) return;
+    if (!newEmployeeName.trim()) {
+      alert('Vui lòng nhập tên nhân viên');
+      return;
+    }
+    if (!newEmployeePassword || newEmployeePassword.length < 6) {
+      alert('Mật khẩu nhân viên tối thiểu 6 ký tự');
+      return;
+    }
 
     try {
       const empId = `emp_${Date.now()}`;
+      const passwordHash = await hashPassword(newEmployeePassword);
       const newEmp = {
         id: empId,
-        name: newEmployeeName,
+        name: newEmployeeName.trim(),
         position: newEmployeePosition,
+        passwordHash,
         createdAt: new Date().toISOString()
       };
 
@@ -403,6 +625,7 @@ function ManagerDashboard({ onLogout, onSelectEmployee }) {
 
       setNewEmployeeName('');
       setNewEmployeePosition('SL');
+      setNewEmployeePassword('');
       setShowAddEmployee(false);
       fetchEmployees();
     } catch (error) {
@@ -410,6 +633,82 @@ function ManagerDashboard({ onLogout, onSelectEmployee }) {
       alert('Lỗi: Không thể thêm nhân viên');
     }
   };
+
+  const handleDeleteEmployee = async (emp) => {
+    try {
+      const docRef = doc(db, 'wowops', 'employees');
+      const docSnap = await getDoc(docRef);
+      const currentEmps = docSnap.exists() ? docSnap.data().value || [] : [];
+      const updated = currentEmps.filter(e => e.id !== emp.id);
+      await setDoc(docRef, { value: updated });
+      setDeleteConfirm(null);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      alert('Lỗi: Không thể xóa nhân viên');
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setPwdError('');
+    if (!newPwd || newPwd.length < 6) {
+      setPwdError('Mật khẩu tối thiểu 6 ký tự');
+      return;
+    }
+    try {
+      const passwordHash = await hashPassword(newPwd);
+      const docRef = doc(db, 'wowops', 'employees');
+      const docSnap = await getDoc(docRef);
+      const currentEmps = docSnap.exists() ? docSnap.data().value || [] : [];
+      const updated = currentEmps.map(e =>
+        e.id === pwdModal.employee.id ? { ...e, passwordHash, passwordUpdatedAt: new Date().toISOString() } : e
+      );
+      await setDoc(docRef, { value: updated });
+      setPwdModal(null);
+      setNewPwd('');
+      alert(`✅ Đã đặt mật khẩu mới cho ${pwdModal.employee.name}`);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      setPwdError('Lỗi khi đặt mật khẩu');
+    }
+  };
+
+  const handleChangeManagerPassword = async () => {
+    setSettingsMsg('');
+    if (!oldMgrPwd || !newMgrPwd || !confirmMgrPwd) {
+      setSettingsMsg('❌ Vui lòng điền đầy đủ các trường');
+      return;
+    }
+    if (newMgrPwd.length < 6) {
+      setSettingsMsg('❌ Mật khẩu mới tối thiểu 6 ký tự');
+      return;
+    }
+    if (newMgrPwd !== confirmMgrPwd) {
+      setSettingsMsg('❌ Mật khẩu xác nhận không khớp');
+      return;
+    }
+    try {
+      const auth = await getManagerAuth();
+      const oldHash = await hashPassword(oldMgrPwd);
+      if (auth?.managerPasswordHash !== oldHash) {
+        setSettingsMsg('❌ Mật khẩu cũ không đúng');
+        return;
+      }
+      const newHash = await hashPassword(newMgrPwd);
+      await setManagerAuth(newHash);
+      setSettingsMsg('✅ Đã đổi mật khẩu quản lý thành công');
+      setOldMgrPwd('');
+      setNewMgrPwd('');
+      setConfirmMgrPwd('');
+    } catch (e) {
+      setSettingsMsg('❌ Lỗi khi đổi mật khẩu');
+    }
+  };
+
+  const filteredEmployees = employees.filter(emp =>
+    emp.name.toLowerCase().includes(search.toLowerCase())
+  );
 
   const dateRangeText = dateOffset === 0 ? 'Tuần này' : dateOffset === -1 ? 'Tuần trước' : 'Tháng này';
   const totalTaskCompletion = employees.length > 0 ? Math.round(employees.reduce((a, b) => a + b.taskCompletion, 0) / employees.length) : 0;
@@ -421,17 +720,32 @@ function ManagerDashboard({ onLogout, onSelectEmployee }) {
       <div style={styles.sidebar}>
         <div style={styles.sidebarLogo}>WOW ART Ops</div>
         <nav style={styles.nav}>
-          <div style={styles.navItem}>📊 Dashboard</div>
-          <div style={styles.navItem}>👥 Nhân viên</div>
-          <div style={styles.navItem}>📈 Báo cáo</div>
+          <button
+            onClick={() => setActiveView('dashboard')}
+            style={{ ...styles.navItem, backgroundColor: activeView === 'dashboard' ? 'rgba(255,255,255,0.2)' : 'transparent' }}
+          >
+            📊 Dashboard
+          </button>
+          <button
+            onClick={() => setActiveView('employees')}
+            style={{ ...styles.navItem, backgroundColor: activeView === 'employees' ? 'rgba(255,255,255,0.2)' : 'transparent' }}
+          >
+            👥 Quản lý nhân viên
+          </button>
+          <button
+            onClick={() => setActiveView('settings')}
+            style={{ ...styles.navItem, backgroundColor: activeView === 'settings' ? 'rgba(255,255,255,0.2)' : 'transparent' }}
+          >
+            ⚙️ Cài đặt
+          </button>
         </nav>
         <div style={styles.divider} />
         <div style={styles.employeeList}>
-          <h3 style={styles.sectionTitle}>Nhân viên</h3>
+          <h3 style={styles.sectionTitle}>Danh sách nhanh</h3>
           {employees.length === 0 ? (
             <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textAlign: 'center' }}>Chưa có nhân viên</p>
           ) : (
-            employees.map(emp => (
+            employees.slice(0, 8).map(emp => (
               <div
                 key={emp.id}
                 onClick={() => onSelectEmployee(emp)}
@@ -453,123 +767,335 @@ function ManagerDashboard({ onLogout, onSelectEmployee }) {
       </div>
 
       <div style={styles.mainContent}>
-        <div style={styles.header}>
-          <h1 style={styles.pageTitle}>Dashboard</h1>
-          <div style={styles.dateButtons}>
-            <button
-              onClick={() => setDateOffset(0)}
-              style={{ ...styles.dateButton, backgroundColor: dateOffset === 0 ? '#10b981' : '#e5e7eb', color: dateOffset === 0 ? 'white' : '#374151' }}
-            >
-              Tuần này
-            </button>
-            <button
-              onClick={() => setDateOffset(-1)}
-              style={{ ...styles.dateButton, backgroundColor: dateOffset === -1 ? '#10b981' : '#e5e7eb', color: dateOffset === -1 ? 'white' : '#374151' }}
-            >
-              Tuần trước
-            </button>
-            <button
-              onClick={() => setDateOffset(-4)}
-              style={{ ...styles.dateButton, backgroundColor: dateOffset === -4 ? '#10b981' : '#e5e7eb', color: dateOffset === -4 ? 'white' : '#374151' }}
-            >
-              Tháng này
-            </button>
-          </div>
-        </div>
-
-        {loading ? (
-          <LoadingSkeleton />
-        ) : employees.length === 0 ? (
-          <EmptyState
-            message="Chưa có nhân viên nào"
-            actionText="Thêm nhân viên đầu tiên"
-            onAction={() => setShowAddEmployee(true)}
-          />
-        ) : (
+        {/* ====== DASHBOARD VIEW ====== */}
+        {activeView === 'dashboard' && (
           <>
-            <div style={styles.summaryCards}>
-              <div style={styles.summaryCard}>
-                <div style={styles.cardLabel}>Tổng nhân viên</div>
-                <div style={styles.cardValue}>{employees.length}</div>
+            <div style={styles.header}>
+              <div>
+                <h1 style={styles.pageTitle}>Dashboard</h1>
+                <p style={styles.subtitle}>Tổng quan hiệu suất đội ngũ WOW ART</p>
               </div>
-              <div style={styles.summaryCard}>
-                <div style={styles.cardLabel}>Hoàn thành công việc</div>
-                <div style={styles.cardValue}>{totalTaskCompletion}%</div>
-              </div>
-              <div style={styles.summaryCard}>
-                <div style={styles.cardLabel}>KPI Hành động</div>
-                <div style={styles.cardValue}>{totalLeadingAvg}</div>
-              </div>
-              <div style={styles.summaryCard}>
-                <div style={styles.cardLabel}>KPI Kết quả</div>
-                <div style={styles.cardValue}>{totalLaggingAvg}</div>
+              <div style={styles.dateButtons}>
+                <button
+                  onClick={() => setDateOffset(0)}
+                  style={{ ...styles.dateButton, backgroundColor: dateOffset === 0 ? '#10b981' : '#e5e7eb', color: dateOffset === 0 ? 'white' : '#374151' }}
+                >
+                  Tuần này
+                </button>
+                <button
+                  onClick={() => setDateOffset(-1)}
+                  style={{ ...styles.dateButton, backgroundColor: dateOffset === -1 ? '#10b981' : '#e5e7eb', color: dateOffset === -1 ? 'white' : '#374151' }}
+                >
+                  Tuần trước
+                </button>
+                <button
+                  onClick={() => setDateOffset(-4)}
+                  style={{ ...styles.dateButton, backgroundColor: dateOffset === -4 ? '#10b981' : '#e5e7eb', color: dateOffset === -4 ? 'white' : '#374151' }}
+                >
+                  Tháng này
+                </button>
               </div>
             </div>
 
-            <div style={styles.employeeGrid}>
-              {employees.map(emp => (
-                <div
-                  key={emp.id}
-                  onClick={() => onSelectEmployee(emp)}
-                  style={styles.employeeCard}
-                >
-                  <div style={styles.cardHeader}>
-                    <h3 style={styles.empName}>{emp.name}</h3>
-                    <span style={styles.positionBadge}>{emp.position}</span>
+            {loading ? (
+              <LoadingSkeleton />
+            ) : employees.length === 0 ? (
+              <EmptyState
+                message="Chưa có nhân viên nào"
+                actionText="Thêm nhân viên đầu tiên"
+                onAction={() => setShowAddEmployee(true)}
+              />
+            ) : (
+              <>
+                <div style={styles.summaryCards}>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.cardLabel}>Tổng nhân viên</div>
+                    <div style={styles.cardValue}>{employees.length}</div>
                   </div>
-                  <div style={styles.cardMetric}>
-                    <span style={styles.metricLabel}>Công việc:</span>
-                    <div style={{ ...styles.progressBar, flex: 1 }}>
-                      <div
-                        style={{
-                          ...styles.progressFill,
-                          width: `${emp.taskCompletion}%`,
-                          backgroundColor: '#3b82f6'
-                        }}
-                      />
-                    </div>
-                    <span style={styles.metricValue}>{emp.taskCompletion}%</span>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.cardLabel}>Hoàn thành công việc</div>
+                    <div style={styles.cardValue}>{totalTaskCompletion}%</div>
                   </div>
-                  <div style={styles.cardMetric}>
-                    <span style={styles.metricLabel}>KPI Hành động:</span>
-                    <span style={styles.metricValue}>{emp.leadingAvg}</span>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.cardLabel}>KPI Hành động</div>
+                    <div style={styles.cardValue}>{totalLeadingAvg}</div>
                   </div>
-                  <div style={styles.cardMetric}>
-                    <span style={styles.metricLabel}>KPI Kết quả:</span>
-                    <span style={styles.metricValue}>{emp.laggingAvg}</span>
+                  <div style={styles.summaryCard}>
+                    <div style={styles.cardLabel}>KPI Kết quả</div>
+                    <div style={styles.cardValue}>{totalLaggingAvg}</div>
                   </div>
                 </div>
-              ))}
+
+                <div style={styles.employeeGrid}>
+                  {employees.map(emp => (
+                    <div key={emp.id} style={styles.employeeCard}>
+                      <div style={styles.cardHeader}>
+                        <h3 style={styles.empName} onClick={() => onSelectEmployee(emp)}>{emp.name}</h3>
+                        <span style={styles.positionBadge}>{emp.position}</span>
+                      </div>
+                      <div onClick={() => onSelectEmployee(emp)} style={{ cursor: 'pointer' }}>
+                        <div style={styles.cardMetric}>
+                          <span style={styles.metricLabel}>Công việc:</span>
+                          <div style={{ ...styles.progressBar, flex: 1 }}>
+                            <div
+                              style={{
+                                ...styles.progressFill,
+                                width: `${emp.taskCompletion}%`,
+                                backgroundColor: '#3b82f6'
+                              }}
+                            />
+                          </div>
+                          <span style={styles.metricValue}>{emp.taskCompletion}%</span>
+                        </div>
+                        <div style={styles.cardMetric}>
+                          <span style={styles.metricLabel}>KPI Hành động:</span>
+                          <span style={styles.metricValue}>{emp.leadingAvg}</span>
+                        </div>
+                        <div style={styles.cardMetric}>
+                          <span style={styles.metricLabel}>KPI Kết quả:</span>
+                          <span style={styles.metricValue}>{emp.laggingAvg}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ====== EMPLOYEES VIEW ====== */}
+        {activeView === 'employees' && (
+          <>
+            <div style={styles.header}>
+              <div>
+                <h1 style={styles.pageTitle}>Quản lý nhân viên</h1>
+                <p style={styles.subtitle}>Thêm, xóa, đặt lại mật khẩu cho nhân viên</p>
+              </div>
+              <button onClick={() => setShowAddEmployee(true)} style={{ ...styles.primaryBtn, flex: 'none' }}>
+                + Thêm nhân viên
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <input
+                type="text"
+                placeholder="🔍 Tìm kiếm tên nhân viên..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ ...styles.input, width: '100%', maxWidth: 400 }}
+              />
+            </div>
+
+            {loading ? (
+              <LoadingSkeleton />
+            ) : filteredEmployees.length === 0 ? (
+              <EmptyState message={employees.length === 0 ? "Chưa có nhân viên nào" : "Không tìm thấy nhân viên phù hợp"} />
+            ) : (
+              <div style={styles.empTable}>
+                <div style={styles.empTableHeader}>
+                  <div style={{ flex: 2 }}>Tên nhân viên</div>
+                  <div style={{ flex: 1 }}>Vị trí</div>
+                  <div style={{ flex: 1 }}>Mật khẩu</div>
+                  <div style={{ flex: 1, textAlign: 'right' }}>Thao tác</div>
+                </div>
+                {filteredEmployees.map(emp => (
+                  <div key={emp.id} style={styles.empTableRow}>
+                    <div style={{ flex: 2, fontWeight: 600 }}>{emp.name}</div>
+                    <div style={{ flex: 1 }}>
+                      <span style={styles.positionBadge}>{positionNames[emp.position] || emp.position}</span>
+                    </div>
+                    <div style={{ flex: 1, fontSize: 12, color: emp.passwordHash ? '#10b981' : '#ef4444' }}>
+                      {emp.passwordHash ? '✓ Đã cấp' : '✗ Chưa cấp'}
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => onSelectEmployee(emp)}
+                        style={styles.actionBtn}
+                        title="Xem chi tiết"
+                      >
+                        👁 Xem
+                      </button>
+                      <button
+                        onClick={() => { setPwdModal({ employee: emp }); setNewPwd(''); setPwdError(''); }}
+                        style={{ ...styles.actionBtn, backgroundColor: '#fef3c7', color: '#92400e' }}
+                        title="Đặt lại mật khẩu"
+                      >
+                        🔑 Đổi MK
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirm({ employee: emp })}
+                        style={{ ...styles.actionBtn, backgroundColor: '#fee2e2', color: '#991b1b' }}
+                        title="Xóa nhân viên"
+                      >
+                        🗑 Xóa
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ====== SETTINGS VIEW ====== */}
+        {activeView === 'settings' && (
+          <>
+            <div style={styles.header}>
+              <div>
+                <h1 style={styles.pageTitle}>Cài đặt</h1>
+                <p style={styles.subtitle}>Quản lý mật khẩu và tùy chọn hệ thống</p>
+              </div>
+            </div>
+
+            <div style={styles.settingsCard}>
+              <h3 style={styles.formTitle}>🔐 Đổi mật khẩu quản lý</h3>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Mật khẩu hiện tại</label>
+                <input
+                  type="password"
+                  value={oldMgrPwd}
+                  onChange={(e) => setOldMgrPwd(e.target.value)}
+                  style={styles.input}
+                  placeholder="••••••"
+                />
+                <label style={styles.label}>Mật khẩu mới (tối thiểu 6 ký tự)</label>
+                <input
+                  type="password"
+                  value={newMgrPwd}
+                  onChange={(e) => setNewMgrPwd(e.target.value)}
+                  style={styles.input}
+                  placeholder="••••••"
+                />
+                <label style={styles.label}>Xác nhận mật khẩu mới</label>
+                <input
+                  type="password"
+                  value={confirmMgrPwd}
+                  onChange={(e) => setConfirmMgrPwd(e.target.value)}
+                  style={styles.input}
+                  placeholder="••••••"
+                />
+                {settingsMsg && (
+                  <div style={settingsMsg.startsWith('✅') ? styles.successBox : styles.errorBox}>
+                    {settingsMsg}
+                  </div>
+                )}
+                <button onClick={handleChangeManagerPassword} style={{ ...styles.primaryBtn, maxWidth: 240 }}>
+                  Đổi mật khẩu
+                </button>
+              </div>
             </div>
           </>
         )}
       </div>
 
+      {/* ====== ADD EMPLOYEE MODAL ====== */}
       {showAddEmployee && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
+        <div style={styles.modalOverlay} onClick={() => setShowAddEmployee(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
             <h2 style={styles.modalTitle}>Thêm nhân viên mới</h2>
-            <input
-              type="text"
-              placeholder="Tên nhân viên"
-              value={newEmployeeName}
-              onChange={(e) => setNewEmployeeName(e.target.value)}
-              style={styles.input}
-            />
-            <select
-              value={newEmployeePosition}
-              onChange={(e) => setNewEmployeePosition(e.target.value)}
-              style={styles.select}
-            >
-              {Object.entries(positionNames).map(([key, name]) => (
-                <option key={key} value={key}>{name}</option>
-              ))}
-            </select>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Tên nhân viên</label>
+              <input
+                type="text"
+                placeholder="VD: Nguyễn Văn A"
+                value={newEmployeeName}
+                onChange={(e) => setNewEmployeeName(e.target.value)}
+                style={styles.input}
+                autoFocus
+              />
+              <label style={styles.label}>Vị trí</label>
+              <select
+                value={newEmployeePosition}
+                onChange={(e) => setNewEmployeePosition(e.target.value)}
+                style={styles.select}
+              >
+                {Object.entries(positionNames).map(([key, name]) => (
+                  <option key={key} value={key}>{name}</option>
+                ))}
+              </select>
+              <label style={styles.label}>Mật khẩu đăng nhập (tối thiểu 6 ký tự)</label>
+              <input
+                type="text"
+                placeholder="••••••"
+                value={newEmployeePassword}
+                onChange={(e) => setNewEmployeePassword(e.target.value)}
+                style={styles.input}
+              />
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                💡 Hãy cung cấp mật khẩu này cho nhân viên để họ có thể đăng nhập.
+              </div>
+            </div>
             <div style={styles.modalButtons}>
               <button onClick={handleAddEmployee} style={styles.primaryBtn}>
                 Thêm nhân viên
               </button>
-              <button onClick={() => setShowAddEmployee(false)} style={styles.secondaryBtn}>
+              <button
+                onClick={() => { setShowAddEmployee(false); setNewEmployeeName(''); setNewEmployeePassword(''); }}
+                style={styles.secondaryBtn}
+              >
+                Hủy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====== PASSWORD RESET MODAL ====== */}
+      {pwdModal && (
+        <div style={styles.modalOverlay} onClick={() => setPwdModal(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 style={styles.modalTitle}>🔑 Đặt lại mật khẩu</h2>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+              Nhân viên: <strong style={{ color: '#1f2937' }}>{pwdModal.employee.name}</strong>
+            </p>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Mật khẩu mới (tối thiểu 6 ký tự)</label>
+              <input
+                type="text"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                style={styles.input}
+                placeholder="••••••"
+                autoFocus
+              />
+              {pwdError && <div style={styles.errorBox}>{pwdError}</div>}
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                ⚠️ Sau khi lưu, hãy thông báo mật khẩu mới cho nhân viên.
+              </div>
+            </div>
+            <div style={styles.modalButtons}>
+              <button onClick={handleResetPassword} style={styles.primaryBtn}>
+                Lưu mật khẩu
+              </button>
+              <button onClick={() => { setPwdModal(null); setNewPwd(''); setPwdError(''); }} style={styles.secondaryBtn}>
+                Hủy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====== DELETE CONFIRM MODAL ====== */}
+      {deleteConfirm && (
+        <div style={styles.modalOverlay} onClick={() => setDeleteConfirm(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ ...styles.modalTitle, color: '#dc2626' }}>🗑 Xóa nhân viên</h2>
+            <p style={{ fontSize: 14, color: '#374151', marginBottom: 20, lineHeight: 1.6 }}>
+              Bạn có chắc muốn xóa <strong>{deleteConfirm.employee.name}</strong>?
+              <br />
+              <span style={{ color: '#dc2626', fontSize: 13 }}>
+                ⚠️ Hành động này không thể hoàn tác. Dữ liệu KPI và task của nhân viên vẫn được giữ lại nhưng sẽ không thể truy cập.
+              </span>
+            </p>
+            <div style={styles.modalButtons}>
+              <button
+                onClick={() => handleDeleteEmployee(deleteConfirm.employee)}
+                style={{ ...styles.primaryBtn, backgroundColor: '#dc2626' }}
+              >
+                Xác nhận xóa
+              </button>
+              <button onClick={() => setDeleteConfirm(null)} style={styles.secondaryBtn}>
                 Hủy
               </button>
             </div>
@@ -1818,5 +2344,90 @@ const styles = {
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s'
+  },
+
+  // Auth & Feedback
+  infoBox: {
+    backgroundColor: '#eff6ff',
+    color: '#1e40af',
+    padding: '12px 14px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    border: '1px solid #bfdbfe',
+    lineHeight: 1.5
+  },
+  errorBox: {
+    backgroundColor: '#fee2e2',
+    color: '#991b1b',
+    padding: '10px 14px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    border: '1px solid #fecaca',
+    fontWeight: 500
+  },
+  successBox: {
+    backgroundColor: '#d1fae5',
+    color: '#065f46',
+    padding: '10px 14px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    border: '1px solid #a7f3d0',
+    fontWeight: 500
+  },
+  checkRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 13,
+    color: '#6b7280',
+    cursor: 'pointer'
+  },
+
+  // Employee management table
+  empTable: {
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    overflow: 'hidden'
+  },
+  empTableHeader: {
+    display: 'flex',
+    gap: 12,
+    padding: '14px 20px',
+    backgroundColor: '#f3f4f6',
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#374151',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    borderBottom: '1px solid #e5e7eb'
+  },
+  empTableRow: {
+    display: 'flex',
+    gap: 12,
+    padding: '16px 20px',
+    fontSize: 14,
+    color: '#1f2937',
+    borderBottom: '1px solid #f3f4f6',
+    alignItems: 'center',
+    transition: 'background-color 0.15s'
+  },
+  actionBtn: {
+    padding: '6px 10px',
+    border: 'none',
+    borderRadius: 5,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    backgroundColor: '#e0e7ff',
+    color: '#3730a3',
+    transition: 'all 0.2s'
+  },
+  settingsCard: {
+    backgroundColor: 'white',
+    padding: 28,
+    borderRadius: 8,
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    maxWidth: 520
   }
 };
